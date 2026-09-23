@@ -1,0 +1,170 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Security gates for every PR and push to main, plus a weekly full scan.
+#
+# IMPORTANT: before enabling, pin every `uses:` to a full commit SHA
+# (e.g. actions/checkout@<40-char-sha> # v4.x.x). Renovate keeps pinned SHAs updated.
+# Tags are shown here only for readability.
+
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"   # weekly full scan, Monday 03:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  go-security:
+    name: gosec + govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./server/... ./runner/... ./cli/...
+      - name: gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -severity medium -confidence medium -exclude-generated ./server/... ./runner/... ./cli/...
+
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep   # pin by digest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: >
+          semgrep scan --error
+          --config p/owasp-top-ten
+          --config p/golang
+          --config p/typescript
+          --config p/react
+          --config .semgrep/
+          --exclude '**/*_gen.go' --exclude '**/*.pb.go' --exclude 'packages/api-client/src/gen'
+
+  codeql:
+    name: codeql
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  dependencies:
+    name: dependency vulns + licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+      - name: osv-scanner
+        run: |
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+          osv-scanner scan --recursive .
+      - uses: pnpm/action-setup@v4
+      - name: pnpm audit
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm audit --audit-level high
+      - name: cargo audit
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+      - name: license allowlist
+        run: make license-check
+
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
+
+  iac-and-images:
+    name: trivy (config + fs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Trivy config (Dockerfiles, Helm, compose)
+        uses: aquasecurity/trivy-action@master   # pin to a release SHA
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Trivy filesystem vulns
+        uses: aquasecurity/trivy-action@master   # pin to a release SHA
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  workflow-lint:
+    name: actionlint + zizmor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          actionlint
+      - name: zizmor (workflow security audit)
+        run: |
+          pipx install zizmor
+          zizmor .github/workflows
