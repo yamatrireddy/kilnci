@@ -1,0 +1,861 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Kiln HTTP API — SOURCE OF TRUTH (CLAUDE.md invariant 1).
+# Change this file first, then `make generate`, then implement.
+# Status: DRAFT (Phase 0). No stability guarantees until Phase 5.
+#
+# Every operation declares:
+#   - security (or `security: []` for the allowlisted public/pre-auth routes)
+#   - x-kiln-permission (checked by the router at startup against internal/auth/authz)
+#   - all error responses
+openapi: 3.0.3
+info:
+  title: Kiln API
+  version: 0.1.0-draft
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+  - bearerAuth: []
+
+tags:
+  - name: health
+  - name: auth
+  - name: orgs
+  - name: members
+  - name: projects
+  - name: tokens
+  - name: audit
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: getHealthz
+      summary: Liveness probe
+      security: []
+      x-kiln-permission: public
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /readyz:
+    get:
+      tags: [health]
+      operationId: getReadyz
+      summary: Readiness probe
+      security: []
+      x-kiln-permission: public
+      responses:
+        "200":
+          description: All dependencies reachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Readiness" }
+        "503":
+          description: A dependency is unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Readiness" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/auth/login:
+    get:
+      tags: [auth]
+      operationId: startLogin
+      summary: Start an OIDC login (pre-authentication, ADR-0003)
+      description: |
+        Redirects the browser to the identity provider.
+        `client=web` sets a short-lived, HttpOnly login-state cookie and returns
+        to `returnTo` (a same-origin path) after login.
+        `client=desktop` requires `redirectUri` (RFC 8252 loopback), `codeChallenge`
+        (S256), and `state`; after login the browser is sent to `redirectUri`
+        with a one-time `code` for POST /api/v1/auth/token.
+      security: []
+      x-kiln-permission: preauth
+      parameters:
+        - name: client
+          in: query
+          required: true
+          schema: { type: string, enum: [web, desktop] }
+        - name: returnTo
+          in: query
+          # A same-origin path: "/" or "/x..." where x is not "/" or "\".
+          schema: { type: string, maxLength: 512, pattern: "^/(?:[^/\\\\].*)?$" }
+        - name: redirectUri
+          in: query
+          schema: { type: string, maxLength: 128, pattern: "^http://127\\.0\\.0\\.1:[0-9]{1,5}/callback$" }
+        - name: codeChallenge
+          in: query
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+        - name: state
+          in: query
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]{16,128}$" }
+      responses:
+        "303": { $ref: "#/components/responses/Redirect" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/auth/callback:
+    get:
+      tags: [auth]
+      operationId: completeLogin
+      summary: OIDC redirect target (pre-authentication, ADR-0003)
+      security: []
+      x-kiln-permission: preauth
+      parameters:
+        - name: code
+          in: query
+          schema: { type: string, maxLength: 2048 }
+        - name: state
+          in: query
+          schema: { type: string, maxLength: 256 }
+        - name: error
+          in: query
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "303": { $ref: "#/components/responses/Redirect" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/auth/token:
+    post:
+      tags: [auth]
+      operationId: exchangeToken
+      summary: Exchange a desktop login code or refresh token (pre-authentication, ADR-0003)
+      description: |
+        `authorization_code` redeems the one-time code from the desktop login
+        with the PKCE `codeVerifier`. `refresh_token` rotates a refresh token;
+        reusing a rotated refresh token revokes the whole token family.
+      security: []
+      x-kiln-permission: preauth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRequest" }
+      responses:
+        "200":
+          description: New tokens
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/session:
+    get:
+      tags: [auth]
+      operationId: getSession
+      summary: The current principal
+      x-kiln-permission: session:read
+      responses:
+        "200":
+          description: Current session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    delete:
+      tags: [auth]
+      operationId: deleteSession
+      summary: Sign out (revokes the session or desktop token family)
+      x-kiln-permission: session:delete
+      responses:
+        "204": { description: Signed out }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs:
+    get:
+      tags: [orgs]
+      operationId: listOrgs
+      summary: Orgs the caller is a member of
+      x-kiln-permission: orgs:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of orgs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    post:
+      tags: [orgs]
+      operationId: createOrg
+      summary: Create an org (instance admins only); the caller becomes its owner
+      x-kiln-permission: orgs:create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrgCreate" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [orgs]
+      operationId: getOrg
+      summary: Get an org
+      x-kiln-permission: orgs:read
+      responses:
+        "200":
+          description: The org
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/members:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [members]
+      operationId: listMembers
+      summary: Members of an org
+      x-kiln-permission: members:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of members
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemberList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    post:
+      tags: [members]
+      operationId: addMember
+      summary: Add an existing user to the org (audited)
+      description: Only owners may grant the owner role.
+      x-kiln-permission: members:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MemberAdd" }
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/UserID"
+    put:
+      tags: [members]
+      operationId: updateMember
+      summary: Change a member's role (audited)
+      description: Only owners may grant or revoke the owner role; the last owner cannot be demoted.
+      x-kiln-permission: members:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MemberUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    delete:
+      tags: [members]
+      operationId: removeMember
+      summary: Remove a member (audited)
+      description: Only owners may remove an owner; the last owner cannot be removed.
+      x-kiln-permission: members:manage
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [projects]
+      operationId: listProjects
+      summary: Projects in an org
+      x-kiln-permission: projects:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of projects
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    post:
+      tags: [projects]
+      operationId: createProject
+      summary: Create a project (org admins)
+      x-kiln-permission: projects:create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProjectCreate" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+    get:
+      tags: [projects]
+      operationId: getProject
+      summary: Get a project
+      x-kiln-permission: projects:read
+      responses:
+        "200":
+          description: The project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/audit-events:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [audit]
+      operationId: listAuditEvents
+      summary: Audit log for an org, newest first (org admins)
+      x-kiln-permission: audit:read
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of audit events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEventList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/tokens:
+    get:
+      tags: [tokens]
+      operationId: listTokens
+      summary: The caller's personal API tokens (metadata only)
+      x-kiln-permission: tokens:list
+      responses:
+        "200":
+          description: Tokens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APITokenList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    post:
+      tags: [tokens]
+      operationId: createToken
+      summary: Create a personal API token; the secret is returned once
+      description: API tokens cannot create other API tokens; use a session.
+      x-kiln-permission: tokens:create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/APITokenCreate" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APITokenCreated" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/tokens/{tokenId}:
+    parameters:
+      - name: tokenId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    delete:
+      tags: [tokens]
+      operationId: revokeToken
+      summary: Revoke one of the caller's API tokens
+      x-kiln-permission: tokens:delete
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-kiln_session
+      description: |
+        Browser session. State-changing requests must also send `X-CSRF-Token`
+        with the value from GET /api/v1/session.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Desktop access token or personal API token (`kiln_pat_...`).
+
+  parameters:
+    OrgSlug:
+      name: orgSlug
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Slug" }
+    ProjectSlug:
+      name: projectSlug
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/Slug" }
+    UserID:
+      name: userId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `nextCursor`.
+      schema: { type: string, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+
+  headers:
+    Location:
+      schema: { type: string }
+
+  responses:
+    Redirect:
+      description: Redirect
+      headers:
+        Location: { schema: { type: string } }
+    Unauthenticated:
+      description: Missing or invalid credentials
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: Authenticated but not permitted (or CSRF token missing)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: Not found, or not visible to the caller
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: Conflicts with current state
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Validation:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PayloadTooLarge:
+      description: Request body too large
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Internal:
+      description: Unexpected server error
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    ID:
+      type: string
+      description: Opaque ULID.
+      pattern: "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    Slug:
+      type: string
+      minLength: 1
+      maxLength: 40
+      pattern: "^[a-z0-9](?:[a-z0-9]|-[a-z0-9]){0,39}$"
+    Name:
+      type: string
+      minLength: 1
+      maxLength: 100
+    Role:
+      type: string
+      enum: [viewer, developer, admin, owner]
+    Permission:
+      type: string
+      enum:
+        - session:read
+        - orgs:list
+        - orgs:read
+        - members:list
+        - projects:list
+        - projects:read
+        - audit:read
+      description: Actions an API token may be scoped to (read-only in Phase 0).
+
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok] }
+    Readiness:
+      type: object
+      additionalProperties: false
+      required: [status, checks]
+      properties:
+        status: { type: string, enum: [ok, unavailable] }
+        checks:
+          type: object
+          additionalProperties: { type: string, enum: [ok, unavailable] }
+
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status, requestId]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        requestId: { type: string }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string }
+        message: { type: string }
+
+    TokenRequest:
+      type: object
+      additionalProperties: false
+      required: [grantType]
+      properties:
+        grantType: { type: string, enum: [authorization_code, refresh_token] }
+        code: { type: string, maxLength: 128 }
+        codeVerifier: { type: string, pattern: "^[A-Za-z0-9._~-]{43,128}$" }
+        redirectUri: { type: string, maxLength: 128 }
+        refreshToken: { type: string, maxLength: 128 }
+    TokenResponse:
+      type: object
+      additionalProperties: false
+      required: [accessToken, refreshToken, tokenType, expiresIn, refreshExpiresIn]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, description: "Seconds until the access token expires." }
+        refreshExpiresIn: { type: integer, description: "Seconds until the refresh token expires." }
+
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, email, displayName]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        email: { type: string }
+        displayName: { type: string }
+    Session:
+      type: object
+      additionalProperties: false
+      required: [user, instanceAdmin, authMethod]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        instanceAdmin: { type: boolean }
+        authMethod: { type: string, enum: [session, bearer] }
+        csrfToken:
+          type: string
+          description: Present for cookie sessions; send as X-CSRF-Token on unsafe requests.
+        expiresAt: { type: string, format: date-time }
+
+    Org:
+      type: object
+      additionalProperties: false
+      required: [id, slug, name, role, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        slug: { $ref: "#/components/schemas/Slug" }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        createdAt: { type: string, format: date-time }
+    OrgCreate:
+      type: object
+      additionalProperties: false
+      required: [slug, name]
+      properties:
+        slug: { $ref: "#/components/schemas/Slug" }
+        name: { $ref: "#/components/schemas/Name" }
+    OrgList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Org" }
+        nextCursor: { type: string, nullable: true }
+
+    Member:
+      type: object
+      additionalProperties: false
+      required: [userId, email, displayName, role]
+      properties:
+        userId: { $ref: "#/components/schemas/ID" }
+        email: { type: string }
+        displayName: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+    MemberAdd:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email: { type: string, minLength: 3, maxLength: 254 }
+        role: { $ref: "#/components/schemas/Role" }
+    MemberUpdate:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { $ref: "#/components/schemas/Role" }
+    MemberList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Member" }
+        nextCursor: { type: string, nullable: true }
+
+    Project:
+      type: object
+      additionalProperties: false
+      required: [id, slug, name, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        slug: { $ref: "#/components/schemas/Slug" }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+    ProjectCreate:
+      type: object
+      additionalProperties: false
+      required: [slug, name]
+      properties:
+        slug: { $ref: "#/components/schemas/Slug" }
+        name: { $ref: "#/components/schemas/Name" }
+    ProjectList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Project" }
+        nextCursor: { type: string, nullable: true }
+
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, occurredAt, actorKind, actorId, action, targetType, targetId, result, requestId]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        occurredAt: { type: string, format: date-time }
+        actorKind: { type: string }
+        actorId: { type: string }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        result: { type: string, enum: [success, denied] }
+        requestId: { type: string }
+        sourceIp: { type: string }
+        userAgent: { type: string }
+    AuditEventList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEvent" }
+        nextCursor: { type: string, nullable: true }
+
+    APIToken:
+      type: object
+      additionalProperties: false
+      required: [id, name, prefix, scopes, createdAt, expiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { $ref: "#/components/schemas/Name" }
+        prefix: { type: string, description: "First characters of the token, for identification." }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Permission" }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+    APITokenCreate:
+      type: object
+      additionalProperties: false
+      required: [name, scopes, expiresInDays]
+      properties:
+        name: { $ref: "#/components/schemas/Name" }
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Permission" }
+        expiresInDays: { type: integer, minimum: 1, maximum: 365 }
+    APITokenCreated:
+      type: object
+      additionalProperties: false
+      required: [token, apiToken]
+      properties:
+        token:
+          type: string
+          description: The secret token. Shown once; store it securely.
+        apiToken: { $ref: "#/components/schemas/APIToken" }
+    APITokenList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/APIToken" }

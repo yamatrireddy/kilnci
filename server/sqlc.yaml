@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# sqlc: the only way the server talks SQL (CLAUDE.md). Run via `make generate`.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/store/queries
+    gen:
+      go:
+        package: db
+        out: internal/store/db
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        overrides:
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true

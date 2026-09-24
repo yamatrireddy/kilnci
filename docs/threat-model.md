@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1 — design phase (Phase 0) |
+| **Status** | Draft v0.2 — Phase 0 controls implemented (see statuses in §6) |
 | **Method** | STRIDE per trust boundary, risk = likelihood × impact |
 | **Owners** | Security owners group (see `CODEOWNERS`) |
 | **Related** | `docs/engineering/security-standards.md` (controls, referenced as `SS §n`), ADRs in `docs/adr/` |
@@ -141,23 +141,28 @@ flowchart LR
 
 Risk ratings: Likelihood (L/M/H) × Impact (L/M/H/C) → **Risk** (Low / Medium / High /
 Critical). Status: **P** = planned (design), **I** = implemented, **V** = verified by
-test. All entries are **P** until the relevant phase ships; update as they land.
+test (named). Updated for Phase 0 (ADR-0002, ADR-0003).
 
 ### B1 — Internet → control plane
 
 | ID | STRIDE | Threat | L | I | Risk | Mitigations | Status |
 |---|---|---|---|---|---|---|---|
 | T-01 | S | Forged webhook triggers runs or deploys on attacker-chosen refs | H | H | **High** | HMAC/token verification before parsing, constant-time compare, replay window via delivery ID + timestamp (SS §6, §11) | P |
-| T-02 | S | Session hijack via stolen cookie or CSRF | M | H | **High** | `__Host-` HttpOnly Secure SameSite cookies, CSRF tokens, session rotation, idle/absolute timeouts (SS §3, §10) | P |
-| T-03 | S | API token leakage in logs, repos, or screenshots | M | H | **High** | Hashed at rest, prefixed for secret scanners, scoped, expiring, revocable, last-used tracking (SS §3) | P |
-| T-04 | E | IDOR: user reads or mutates another org's runs, secrets metadata, or apps | H | C | **Critical** | Resource-level `authz.Check`, `org_id` required in every tenant query, 404 on cross-org, authz matrix test (SS §4) | P |
-| T-05 | E | Missing permission on a new endpoint | M | C | **High** | Deny-by-default router; startup check + CI test fails on routes without declared permission (SS §4) | P |
-| T-06 | T | SQL injection via filters, sort, or search | L | C | **Medium** | sqlc only, allow-listed sort/filter fields, Semgrep rule banning string SQL (SS §6) | P |
+| T-02 | S | Session hijack via stolen cookie or CSRF | M | H | **High** | `__Host-` HttpOnly Secure SameSite cookies, CSRF tokens, session rotation, idle/absolute timeouts (SS §3, §10) | V (TestSession_CSRFAndOriginChecks, TestSession_Timeouts, TestLogout_RevokesSession) |
+| T-03 | S | API token leakage in logs, repos, or screenshots | M | H | **High** | Hashed at rest, prefixed for secret scanners, scoped, expiring, revocable, last-used tracking (SS §3) | V (TestAPITokens_ScopedExpiringAndRevocable) |
+| T-04 | E | IDOR: user reads or mutates another org's runs, secrets metadata, or apps | H | C | **Critical** | Resource-level `authz.Check`, `org_id` required in every tenant query, 404 on cross-org, authz matrix test (SS §4) | V (TestAuthzMatrix: every route x role x foreign org) |
+| T-05 | E | Missing permission on a new endpoint | M | C | **High** | Deny-by-default router; startup check + CI test fails on routes without declared permission (SS §4) | V (router startup check; TestRouter_RejectsUnsafeRegistrations, TestRoutesMatchSpec) |
+| T-06 | T | SQL injection via filters, sort, or search | L | C | **Medium** | sqlc only, allow-listed sort/filter fields, Semgrep rule banning string SQL (SS §6) | I (sqlc only; Semgrep kiln-go-string-built-sql) |
 | T-07 | T | Malicious pipeline YAML causes parser DoS or type confusion | H | M | **High** | Safe loader: size, depth, node, alias limits; strict schema; fuzzing (SS §5) | P |
-| T-08 | I | Verbose errors leak internals (SQL, paths, stack traces) | M | M | **Medium** | Single problem-mapping layer, generic messages, `requestId` for correlation | P |
-| T-09 | I | Stored XSS through logs, PR titles, commit messages, or markdown | H | H | **High** | React escaping, sanitized ANSI log renderer, markdown sanitizer, strict CSP (SS §6, §10) | P |
-| T-10 | D | Webhook floods, huge payloads, log-stream fan-out exhaust resources | H | M | **High** | Body size limits, rate limits per IP/principal, per-org quotas, async webhook queue (SS §5, §12) | P |
-| T-11 | R | Admin denies changing a secret or RBAC rule | M | M | **Medium** | Append-only, hash-chained audit log exported to SIEM (SS §12) | P |
+| T-08 | I | Verbose errors leak internals (SQL, paths, stack traces) | M | M | **Medium** | Single problem-mapping layer, generic messages, `requestId` for correlation | V (TestErrorWriter_UnexpectedErrorIsGenericAndLoggedOnce) |
+| T-09 | I | Stored XSS through logs, PR titles, commit messages, or markdown | H | H | **High** | React escaping, sanitized ANSI log renderer, markdown sanitizer, strict CSP (SS §6, §10) | I (React escaping, strict CSP, ESLint/Semgrep bans); log viewer: Phase 1 |
+| T-10 | D | Webhook floods, huge payloads, log-stream fan-out exhaust resources | H | M | **High** | Body size limits, rate limits per IP/principal, per-org quotas, async webhook queue (SS §5, §12) | I (body limits, per-IP /64 + per-principal rate limits); webhook queue: Phase 1 |
+| T-11 | R | Admin denies changing a secret or RBAC rule | M | M | **Medium** | Append-only, hash-chained audit log exported to SIEM (SS §12) | I (hash-chained audit, TestVerify_DetectsTampering); SIEM export: Phase 2 |
+| T-53 | S | Login CSRF: attacker completes their own login in a victim's browser | M | M | **Medium** | Login state bound to the browser by a `__Host-` HttpOnly cookie, single-use server-side state, PKCE, nonce (ADR-0003) | V (TestWebLogin_RequiresBrowserBindingCookie, TestWebLogin_StateIsSingleUseAndExpires) |
+| T-54 | T | Open redirect through `returnTo` or the desktop `redirectUri` | M | M | **Medium** | OpenAPI pattern + `safeReturnTo` (same-origin paths only); desktop redirect pinned to `http://127.0.0.1:<port>/callback` | V (TestWebLogin_ReturnToCannotRedirectOffSite, TestSafeReturnTo_PreventsOpenRedirect) |
+| T-56 | R | Attacker-controlled input (e.g. malformed User-Agent) makes audit inserts fail, silently dropping sign-in events | M | M | **Medium** | Metadata sanitized to valid UTF-8 on a rune boundary before audit insert (security review M2) | V (TestWithFrom_SanitizesUserAgent) |
+| T-57 | D | Rate-limit evasion by rotating IPv6 addresses or spoofing `X-Forwarded-For` | H | M | **High** | Limits keyed per IPv4 address / IPv6 /64; XFF trusted only from configured proxies; bounded O(1) eviction (security review M3) | V (TestNetworkKey, TestClientIP, TestKeyed_ChurnStaysFast) |
+| T-58 | E | IdP asserts another account's (bootstrap) email, escalating to instance admin | L | H | **Medium** | Admin granted only from the email the account actually holds; accounts never merged by email (security review M1) | V (TestProvisioning_CollidingBootstrapEmailDoesNotGrantAdmin) |
 
 ### B2 — Control plane ↔ runner
 
@@ -200,8 +205,9 @@ test. All entries are **P** until the relevant phase ships; update as they land.
 
 | ID | STRIDE | Threat | L | I | Risk | Mitigations | Status |
 |---|---|---|---|---|---|---|---|
-| T-34 | I | Tokens stolen from device storage (browser storage, AsyncStorage, config files) | M | H | **High** | Cookies for web; OS keychain/keystore for desktop, mobile, CLI; short-lived access + rotating refresh tokens (SS §3, §10) | P |
-| T-35 | E | Desktop app IPC abused (XSS in webview → Tauri command → local shell) | M | C | **High** | Minimal allow-listed Tauri capabilities, strict CSP, no remote content in privileged windows (SS §10) | P |
+| T-34 | I | Tokens stolen from device storage (browser storage, AsyncStorage, config files) | M | H | **High** | Cookies for web; OS keychain/keystore for desktop, mobile, CLI; short-lived access + rotating refresh tokens (SS §3, §10) | I (HttpOnly cookies; desktop refresh token in OS keychain, access token in Rust memory only) |
+| T-35 | E | Desktop app IPC abused (XSS in webview → Tauri command → local shell) | M | C | **High** | Minimal allow-listed Tauri capabilities, strict CSP, no remote content in privileged windows (SS §10) | I (5 allow-listed Tauri commands, no plugins, strict CSP; Rust proxies only /api/v1/* checked on the normalized URL, access tokens bound to the issuing server origin; `api_requests_are_confined_to_the_api`) |
+| T-55 | S | Desktop login code obtained silently by a website (victim already signed in at the IdP) and delivered to any local listener; or local processes stalling the loopback listener | M | H | **Medium** | Desktop logins request `prompt=login`; PKCE verifier and state held by the app; state checked in constant time; idle or broken loopback connections are dropped without aborting sign-in. Residual: `prompt` is advisory (auth_time not yet verified, see §9) | I (TestOIDCProvider_AuthCodeURLUsesPKCEAndNonce, TestDesktopFlow) |
 | T-36 | E | Other local processes or websites drive the desktop local runner | M | H | **High** | Local socket or loopback with per-session token and Origin checks | P |
 | T-37 | T | Malicious desktop update delivered | L | C | **Medium** | Signed updates with pinned public key; HTTPS-only update feed | P |
 | T-38 | S | Malicious deep link or push notification triggers approval or deploy | M | H | **High** | Deep links navigate only; actions require in-app confirmation + biometric for approvals (SS §10) | P |
@@ -211,8 +217,8 @@ test. All entries are **P** until the relevant phase ships; update as they land.
 
 | ID | STRIDE | Threat | L | I | Risk | Mitigations | Status |
 |---|---|---|---|---|---|---|---|
-| T-40 | E | **SSRF** via notification webhooks, repo URLs, or OIDC discovery reaching metadata or internal services | H | C | **Critical** | `platform/httpclient`: DNS-resolve-then-check, block private/loopback/link-local/metadata, re-check on redirect, admin allow-list (SS §6) | P |
-| T-41 | S | IdP misconfiguration accepts tokens for wrong audience/issuer | M | C | **High** | Strict `iss`, `aud`, `exp`, `nonce` validation; PKCE; per-org IdP binding | P |
+| T-40 | E | **SSRF** via notification webhooks, repo URLs, or OIDC discovery reaching metadata or internal services | H | C | **Critical** | `platform/httpclient`: DNS-resolve-then-check, block private/loopback/link-local/metadata, re-check on redirect, admin allow-list (SS §6) | V (TestAddrPolicy_*, TestClient_BlocksLoopbackEndToEnd) |
+| T-41 | S | IdP misconfiguration accepts tokens for wrong audience/issuer | M | C | **High** | Strict `iss`, `aud`, `exp`, `nonce` validation; PKCE; per-org IdP binding | V (TestOIDCProvider_Exchange: iss/aud/exp/nonce/signature) |
 | T-42 | I | Over-scoped VCS app permissions amplify a Kiln compromise | M | H | **High** | Minimal GitHub App permissions, per-installation tokens, short-lived installation tokens | P |
 | T-43 | T | Commit status spoofing (attacker marks own PR green) | L | M | **Low** | Status posting only from control plane with app credentials; required checks tied to Kiln app identity | P |
 
@@ -220,17 +226,17 @@ test. All entries are **P** until the relevant phase ships; update as they land.
 
 | ID | STRIDE | Threat | L | I | Risk | Mitigations | Status |
 |---|---|---|---|---|---|---|---|
-| T-44 | I | Database or backup theft exposes secrets | M | C | **High** | Envelope encryption with keys outside the DB (KMS/Vault); encrypted backups; tokens hashed (SS §7) | P |
+| T-44 | I | Database or backup theft exposes secrets | M | C | **High** | Envelope encryption with keys outside the DB (KMS/Vault); encrypted backups; tokens hashed (SS §7) | I for credentials (SHA-256 hashes only); secret encryption: Phase 2 |
 | T-45 | I | Public or misconfigured object storage bucket exposes logs/artifacts | M | H | **High** | Private buckets, pre-signed URLs with short expiry and authz check, Helm defaults verified by Trivy | P |
-| T-46 | T | Audit log tampering by an attacker with DB access | L | H | **Medium** | Hash-chained records, periodic anchoring, SIEM export | P |
+| T-46 | T | Audit log tampering by an attacker with DB access | L | H | **Medium** | Hash-chained records, periodic anchoring, SIEM export | I partial (append-only trigger + hash chain); anchoring and role separation: see §9 |
 | T-47 | E | Instance admin or insider abuses access to read secrets | L | C | **Medium** | Secrets write-only via API; decryption only in leases; admin actions audited; optional two-person approval | P |
 
 ### B7 — Kiln's own supply chain
 
 | ID | STRIDE | Threat | L | I | Risk | Mitigations | Status |
 |---|---|---|---|---|---|---|---|
-| T-48 | T | Malicious or typosquatted dependency | M | C | **High** | Lockfiles, osv-scanner/govulncheck/pnpm audit, dependency review, license allow-list, verification of new packages (SS §13, §15) | P |
-| T-49 | T | Compromised GitHub Action or workflow injection in Kiln's CI | M | C | **High** | SHA-pinned actions, minimal `permissions`, no `pull_request_target`, zizmor + actionlint (SS §13) | P |
+| T-48 | T | Malicious or typosquatted dependency | M | C | **High** | Lockfiles, osv-scanner/govulncheck/pnpm audit, dependency review, license allow-list, verification of new packages (SS §13, §15) | I (lockfiles, govulncheck, osv-scanner, pnpm audit, license allow-list) |
+| T-49 | T | Compromised GitHub Action or workflow injection in Kiln's CI | M | C | **High** | SHA-pinned actions, minimal `permissions`, no `pull_request_target`, zizmor + actionlint (SS §13) | I (SHA-pinned actions, minimal permissions, actionlint, zizmor) |
 | T-50 | T | Tampered release binary, image, or Helm chart | L | C | **Medium** | Reproducible builds, cosign signatures, SLSA provenance, SBOM, verification docs (SS §13) | P |
 | T-51 | T | Maintainer account takeover pushes malicious code | L | C | **Medium** | Hardware-key MFA for maintainers, signed commits, branch protection, two approvals on sensitive paths | P |
 | T-52 | E | AI-generated code introduces subtle vulnerabilities | M | H | **High** | Same gates as human code, security-reviewer subagent, human security owner review on sensitive paths (SS §15) | P |
@@ -300,6 +306,11 @@ compensating control.
 | Kernel-level container escapes (0-days) | Mitigated by ephemeral runners and optional gVisor/Kata; residual risk accepted for default runc | Before 1.0: consider stronger default for hosted mode |
 | Instance admin can ultimately access secrets | Operators control the infrastructure; mitigated by audit and optional two-person rules | Enterprise edition features |
 | Single-node mode with `KILN_MASTER_KEY` on same host as DB | Convenience for small installs; documented as not production-grade | Docs |
+| Audit chain can be rewritten by anyone holding the app's own DB role (it owns the table, so it can disable the trigger and recompute the chain), and truncating the newest events is undetectable | The chain detects edits by anyone without the DB role; stronger controls need deployment changes | Phase 2: separate migration/owner role, grant the app INSERT/SELECT only, HMAC key or periodic head anchoring to SIEM |
+| Removing an email from `KILN_AUTH_BOOTSTRAP_ADMIN_EMAILS` does not revoke instance admin | Grant-only by design (a restart must not lock admins out) | Add an explicit admin-revocation command before 1.0 |
+| The API-token cap (50) can be exceeded slightly by concurrent requests | Count-then-insert under READ COMMITTED; impact is a few extra tokens | Revisit if tokens gain write scopes |
+| Desktop `prompt=login` is advisory: an IdP that ignores it lets an already signed-in user's desktop code be issued without re-authentication | PKCE + state still bind the code to the app that started the flow | Phase 1: send `max_age=0` and verify `auth_time` for desktop logins |
+| Personal API tokens are read-only in Phase 0 | Write scopes need finer-grained authz first | Phase 1 |
 
 ## 10. Out of scope
 

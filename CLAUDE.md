@@ -28,8 +28,11 @@ only summarizes them.
 
 ## Current status
 
-- **Active phase:** Phase 0 — Foundations (see `docs/roadmap.md`)
+- **Active phase:** Phase 0 — Foundations, implemented and pending maintainer review
+  (see `docs/roadmap.md`). Server, web (Mantine), and desktop (Tauri) exist;
+  `runner/`, `cli/`, `proto/`, and `apps/mobile` do not yet.
 - **Stable contracts:** none yet. Treat `docs/api/openapi.yaml` and `proto/` as draft.
+- **UI:** Mantine 9 for web and desktop, with no runtime style injection (ADR-0002).
 - **Security target:** OWASP ASVS v4 Level 2 for the server and web app.
 - Update this section when a phase completes.
 
@@ -124,8 +127,9 @@ Do not violate these without an approved ADR.
 8. **GitOps is isolated.** `internal/gitops` talks to the rest of the server only
    through events and the store.
 9. **Deny by default.** Every route, gRPC method, and Tauri command is denied unless
-   explicitly allowed. Only `/healthz`, `/readyz`, and webhook ingest (signature-
-   verified) are unauthenticated.
+   explicitly allowed. Only `/healthz`, `/readyz`, webhook ingest (signature-
+   verified), and the OIDC pre-auth routes `/api/v1/auth/{login,callback,token}`
+   (ADR-0003) are unauthenticated. The router enforces these allowlists at startup.
 
 ---
 
