@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Everything the UI needs, as static stylesheets (ADR-0002). */
+@import "@mantine/core/styles.css";
+@import "@mantine/notifications/styles.css";
+@import "./theme-vars.css";
+
+/* Screen-reader-only text (used for table header labels on action columns). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
