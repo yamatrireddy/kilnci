@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", ":semanticCommits"],
+  "vulnerabilityAlerts": { "labels": ["security"], "schedule": ["at any time"] },
+  "postUpdateOptions": ["gomodTidy", "pnpmDedupe"],
+  "packageRules": [
+    { "matchManagers": ["github-actions"], "pinDigests": true },
+    { "matchFileNames": ["tools/**"], "groupName": "dev tools" }
+  ]
+}

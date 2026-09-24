@@ -2,9 +2,9 @@
 #
 # Security gates for every PR and push to main, plus a weekly full scan.
 #
-# IMPORTANT: before enabling, pin every `uses:` to a full commit SHA
-# (e.g. actions/checkout@<40-char-sha> # v4.x.x). Renovate keeps pinned SHAs updated.
-# Tags are shown here only for readability.
+# Every `uses:` is pinned to a full commit SHA and container images to a digest;
+# Renovate keeps them updated. Scanner invocations live in the Makefile so
+# `make security` locally runs exactly what CI runs.
 
 name: security
 
@@ -27,40 +27,39 @@ jobs:
     name: gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.work
+          cache-dependency-path: tools/go.sum
+      - run: make sec-gitleaks
 
   go-security:
     name: gosec + govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.work
+      # Tool versions are pinned in tools/go.mod (no @latest installs in CI).
       - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./server/... ./runner/... ./cli/...
+        run: make sec-govulncheck
       - name: gosec
-        run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-          gosec -severity medium -confidence medium -exclude-generated ./server/... ./runner/... ./cli/...
+        run: make sec-gosec
 
   semgrep:
     name: semgrep
     runs-on: ubuntu-latest
     container:
-      image: semgrep/semgrep   # pin by digest
+      image: semgrep/semgrep:1.177.0@sha256:d1825c2c72110b5bfbf0602ff68f7f117322597a7c33037a79dba9f897f5f1f0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: >
@@ -70,7 +69,7 @@ jobs:
           --config p/typescript
           --config p/react
           --config .semgrep/
-          --exclude '**/*_gen.go' --exclude '**/*.pb.go' --exclude 'packages/api-client/src/gen'
+          --exclude '**/*_gen.go' --exclude '**/*.pb.go' --exclude 'packages/api-client/src/gen' --exclude tools
 
   codeql:
     name: codeql
@@ -83,31 +82,33 @@ jobs:
       matrix:
         language: [go, javascript-typescript]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
-      - uses: github/codeql-action/autobuild@v3
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/autobuild@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
 
   dependencies:
     name: dependency vulns + licenses
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.work
+          cache-dependency-path: tools/go.sum
       - name: osv-scanner
-        run: |
-          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
-          osv-scanner scan --recursive .
-      - uses: pnpm/action-setup@v4
+        run: make sec-osv
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - name: pnpm audit
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
@@ -115,7 +116,7 @@ jobs:
       - name: cargo audit
         working-directory: apps/desktop/src-tauri
         run: |
-          cargo install cargo-audit --locked
+          cargo install cargo-audit --locked --version 0.22.2
           cargo audit
       - name: license allowlist
         run: make license-check
@@ -125,7 +126,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
@@ -134,37 +135,25 @@ jobs:
     name: trivy (config + fs)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Trivy config (Dockerfiles, Helm, compose)
-        uses: aquasecurity/trivy-action@master   # pin to a release SHA
-        with:
-          scan-type: config
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-      - name: Trivy filesystem vulns
-        uses: aquasecurity/trivy-action@master   # pin to a release SHA
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+      - name: Trivy config (Dockerfiles, Helm, compose) + filesystem vulns
+        run: make sec-trivy
 
   workflow-lint:
     name: actionlint + zizmor
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.work
       - name: actionlint
-        run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
-          actionlint
+        run: make lint-workflows
       - name: zizmor (workflow security audit)
         run: |
-          pipx install zizmor
+          pipx install zizmor==1.24.0
           zizmor .github/workflows

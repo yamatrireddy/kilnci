@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+packages:
+  - packages/*
+  - apps/web
+  - apps/desktop
+# apps/mobile is deferred (see docs/roadmap.md).
+
+# Supply-chain hardening (security-standards §13, threat T-48):
+# wait 7 days before installing newly published versions,
+minimumReleaseAge: 10080
+# refuse transitive dependencies from git/tarball URLs,
+blockExoticSubdeps: true
+# and refuse updates that drop a package's provenance/trusted publishing.
+trustPolicy: no-downgrade

@@ -1,0 +1,173 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Lint policy for all Go modules. Run from a module dir:
+#   go tool -modfile=../tools/go.mod golangci-lint run --config ../.golangci.yml ./...
+#
+# depguard enforces the layering in docs/engineering/coding-standards.md §1.
+# forbidigo enforces banned APIs from docs/engineering/security-standards.md §5-§6, §11.
+# Do not disable a rule to make code pass; see CLAUDE.md "Security non-negotiables".
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - contextcheck
+    - depguard
+    - errorlint
+    - errname
+    - exhaustive
+    - forbidigo
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - usestdlibvars
+    - wrapcheck
+  settings:
+    depguard:
+      rules:
+        domain-is-pure:
+          # domain imports nothing internal and performs no I/O.
+          list-mode: lax
+          files: ["**/internal/domain/**"]
+          deny:
+            - pkg: github.com/yamatrireddy/kilnci/server/internal/api
+              desc: domain must not import other internal packages
+            - pkg: github.com/yamatrireddy/kilnci/server/internal/service
+              desc: domain must not import other internal packages
+            - pkg: github.com/yamatrireddy/kilnci/server/internal/store
+              desc: domain must not import other internal packages
+            - pkg: github.com/yamatrireddy/kilnci/server/internal/platform
+              desc: domain must not import other internal packages
+            - pkg: github.com/yamatrireddy/kilnci/server/internal/auth
+              desc: domain must not import other internal packages
+            - pkg: net/http
+              desc: domain performs no I/O
+            - pkg: database/sql
+              desc: domain performs no I/O
+            - pkg: os
+              desc: domain performs no I/O
+        api-no-store:
+          # Handlers never call store directly. Integration tests (_test.go)
+          # wire the real stack end to end and are exempt.
+          list-mode: lax
+          files: ["**/internal/api/**", "!$test"]
+          deny:
+            - pkg: github.com/yamatrireddy/kilnci/server/internal/store
+              desc: handlers call services, never store (coding-standards §1)
+            - pkg: database/sql
+              desc: handlers call services, never the database
+        service-no-transport:
+          list-mode: lax
+          files: ["**/internal/service/**"]
+          deny:
+            - pkg: github.com/yamatrireddy/kilnci/server/internal/api
+              desc: service must not depend on the transport layer
+            - pkg: net/http
+              desc: service is transport-agnostic; outbound HTTP goes through platform/httpclient
+        banned-everywhere:
+          list-mode: lax
+          files: ["$all"]
+          deny:
+            - pkg: math/rand
+              desc: use crypto/rand (security-standards §11)
+            - pkg: math/rand/v2
+              desc: use crypto/rand (security-standards §11)
+            - pkg: crypto/md5
+              desc: no MD5 (security-standards §11)
+            - pkg: crypto/des
+              desc: weak cipher
+            - pkg: crypto/rc4
+              desc: weak cipher
+            - pkg: encoding/gob
+              desc: no gob for untrusted input (security-standards §6)
+            - pkg: github.com/pkg/errors
+              desc: use fmt.Errorf with %w
+        yaml-only-in-spec:
+          list-mode: lax
+          files: ["$all", "!**/internal/engine/spec/**", "!**/internal/platform/config/**"]
+          deny:
+            - pkg: gopkg.in/yaml.v3
+              desc: parse untrusted YAML only via engine/spec's safe loader
+            - pkg: go.yaml.in/yaml/v3
+              desc: parse untrusted YAML only via engine/spec's safe loader
+            - pkg: sigs.k8s.io/yaml
+              desc: parse untrusted YAML only via engine/spec's safe loader
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.(Getenv|LookupEnv|Environ)$
+          msg: read configuration only in internal/platform/config (coding-standards §5)
+        - pattern: ^http\.(Get|Head|Post|PostForm)$
+          msg: outbound HTTP goes through platform/httpclient (SSRF protection)
+        - pattern: ^http\.DefaultClient$
+          msg: outbound HTTP goes through platform/httpclient (SSRF protection)
+        - pattern: ^(fmt\.Print.*|print|println)$
+          msg: use log/slog
+        - pattern: ^log\.(Print|Fatal|Panic).*$
+          msg: use log/slog
+    gosec:
+      severity: medium
+      confidence: medium
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: var-naming
+        - name: receiver-naming
+        - name: unexported-return
+    wrapcheck:
+      ignore-sig-regexps:
+        - \.Errorf\(
+        - errors\.New\(
+        - errors\.Join\(
+        - \.Wait\(\)
+      ignore-package-globs:
+        - github.com/yamatrireddy/kilnci/*
+    exhaustive:
+      default-signifies-exhaustive: true
+  exclusions:
+    generated: strict
+    presets: []
+    rules:
+      # Config is the one place allowed to read the environment.
+      - path: internal/platform/config/
+        linters: [forbidigo]
+        text: os\.(Getenv|LookupEnv|Environ)
+      # The httpclient package is where the default transport is wrapped.
+      - path: internal/platform/httpclient/
+        linters: [forbidigo]
+        text: http\.DefaultClient
+      # Test-support package: reads KILN_TEST_DATABASE_URL to find the CI database.
+      - path: internal/store/storetest/
+        linters: [forbidigo]
+        text: os\.Getenv
+      # The entrypoint may print a fatal startup error before logging exists.
+      - path: cmd/
+        linters: [forbidigo]
+        text: fmt\.Print
+      - path: _test\.go
+        linters: [wrapcheck, forbidigo]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: [github.com/yamatrireddy/kilnci]

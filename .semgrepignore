@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Build output and installed dependencies: not Kiln source.
+node_modules/
+**/node_modules/
+**/target/
+**/dist/
+**/coverage/
+tools/
+server/internal/store/db/
+server/internal/api/gen/
+packages/api-client/src/gen/
