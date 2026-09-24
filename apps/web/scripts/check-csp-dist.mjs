@@ -11,9 +11,21 @@ import { resolve } from "node:path";
 const dist = resolve(process.argv[2] ?? "dist");
 const html = readFileSync(resolve(dist, "index.html"), "utf8");
 const problems = [];
-for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
-  const [, attrs = "", body = ""] = m;
-  if (!/\bsrc=/.test(attrs) || body.trim() !== "") problems.push("inline <script>");
+// Walk every "<script" start tag without trying to match end tags with a
+// regex (browsers accept variants like "</script >", which a regex can miss).
+// Each script must have a src attribute and nothing but whitespace before the
+// next "</script" (however that end tag is spelled).
+const lower = html.toLowerCase();
+for (let i = lower.indexOf("<script"); i !== -1; i = lower.indexOf("<script", i + 1)) {
+  const tagEnd = lower.indexOf(">", i);
+  if (tagEnd === -1) {
+    problems.push("unterminated <script> tag");
+    break;
+  }
+  const attrs = lower.slice(i + "<script".length, tagEnd);
+  const close = lower.indexOf("</script", tagEnd);
+  const body = close === -1 ? lower.slice(tagEnd + 1) : lower.slice(tagEnd + 1, close);
+  if (!/\bsrc\s*=/.test(attrs) || body.trim() !== "") problems.push("inline <script>");
 }
 if (/<style\b/i.test(html)) problems.push("inline <style>");
 if (/\sstyle\s*=/i.test(html)) problems.push("style= attribute");
