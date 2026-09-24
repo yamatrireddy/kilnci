@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+# Generated code: collapse in diffs, excluded from language stats.
+server/internal/store/db/** linguist-generated=true
+server/internal/api/gen/*_gen.go linguist-generated=true
+packages/api-client/src/gen/** linguist-generated=true
+pnpm-lock.yaml linguist-generated=true

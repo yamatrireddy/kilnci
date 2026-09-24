@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Development-only OIDC provider. The mockCallback connector signs you in as a
+# fixed test identity (kilgore@kilgore.trout, email verified) with no password,
+# so no credential exists anywhere in the repo. Never use outside local dev.
+issuer: http://localhost:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+staticClients:
+  # Public client: Kiln authenticates with PKCE, no client secret.
+  - id: kiln-dev
+    name: Kiln (local development)
+    public: true
+    redirectURIs:
+      - http://localhost:8080/api/v1/auth/callback
+      - http://localhost:5173/api/v1/auth/callback
+connectors:
+  - type: mockCallback
+    id: mock
+    name: Dev sign-in (no password)

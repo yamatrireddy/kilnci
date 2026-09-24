@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Generates request/response types and the embedded spec (used by the request
+# validation middleware) from docs/api/openapi.yaml. Run via `make generate`.
+package: gen
+output: internal/api/gen/types_gen.go
+generate:
+  models: true
+output-options:
+  skip-prune: true

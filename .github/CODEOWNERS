@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Security-sensitive paths require two approvals, one from @yamatrireddy/security-owners
+# (coding-standards §13). Replace the team handles once the GitHub org teams exist.
+
+*                                   @yamatrireddy
+
+# Security-sensitive areas
+/server/internal/auth/              @yamatrireddy @yamatrireddy/security-owners
+/server/internal/secrets/           @yamatrireddy @yamatrireddy/security-owners
+/server/internal/webhooks/          @yamatrireddy @yamatrireddy/security-owners
+/server/internal/api/               @yamatrireddy @yamatrireddy/security-owners
+/server/internal/gitops/            @yamatrireddy @yamatrireddy/security-owners
+/server/internal/platform/httpclient/ @yamatrireddy @yamatrireddy/security-owners
+/server/internal/platform/safepath/ @yamatrireddy @yamatrireddy/security-owners
+/server/migrations/                 @yamatrireddy @yamatrireddy/security-owners
+/runner/                            @yamatrireddy @yamatrireddy/security-owners
+/proto/                             @yamatrireddy @yamatrireddy/security-owners
+/apps/desktop/src-tauri/            @yamatrireddy @yamatrireddy/security-owners
+/deploy/                            @yamatrireddy @yamatrireddy/security-owners
+/.github/workflows/                 @yamatrireddy @yamatrireddy/security-owners
+/.semgrep/                          @yamatrireddy @yamatrireddy/security-owners
+/.golangci.yml                      @yamatrireddy @yamatrireddy/security-owners
+/docs/engineering/security-standards.md @yamatrireddy @yamatrireddy/security-owners
+/docs/threat-model.md               @yamatrireddy @yamatrireddy/security-owners
+/SECURITY.md                        @yamatrireddy @yamatrireddy/security-owners
+/pnpm-lock.yaml                     @yamatrireddy @yamatrireddy/security-owners
+/server/go.sum                      @yamatrireddy @yamatrireddy/security-owners

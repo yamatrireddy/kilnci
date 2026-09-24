@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Kiln-specific Semgrep rules. Each rule maps to a CLAUDE.md non-negotiable or a
+# section of docs/engineering/security-standards.md. When a vulnerability is fixed,
+# add a rule here that would have caught it (security-standards §14).
+
+rules:
+  - id: kiln-go-insecure-skip-verify
+    languages: [go]
+    severity: ERROR
+    message: Never disable TLS verification (security-standards §11).
+    pattern: |
+      tls.Config{..., InsecureSkipVerify: true, ...}
+    paths:
+      exclude: ["*_test.go"]
+
+  - id: kiln-go-shell-exec
+    languages: [go]
+    severity: ERROR
+    message: No shell string execution on the server; use exec.CommandContext with an argument array (security-standards §6).
+    pattern-either:
+      - pattern: exec.Command("sh", "-c", ...)
+      - pattern: exec.Command("bash", "-c", ...)
+      - pattern: exec.CommandContext($CTX, "sh", "-c", ...)
+      - pattern: exec.CommandContext($CTX, "bash", "-c", ...)
+      - pattern: exec.Command("cmd", "/c", ...)
+      - pattern: exec.CommandContext($CTX, "cmd", "/c", ...)
+
+  - id: kiln-go-string-built-sql
+    languages: [go]
+    severity: ERROR
+    message: SQL only through sqlc; never build SQL strings (security-standards §6).
+    patterns:
+      - pattern-either:
+          - pattern: $DB.$METHOD($CTX, fmt.Sprintf(...), ...)
+          - pattern: $DB.$METHOD(fmt.Sprintf(...), ...)
+          - pattern: $DB.$METHOD($CTX, $A + $B, ...)
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(Query|QueryRow|Exec|QueryContext|QueryRowContext|ExecContext|Prepare|PrepareContext)$
+
+  - id: kiln-go-yaml-unmarshal-outside-spec
+    languages: [go]
+    severity: ERROR
+    message: Parse untrusted YAML only through engine/spec's safe loader.
+    pattern-either:
+      - pattern: yaml.Unmarshal(...)
+      - pattern: yaml.NewDecoder(...)
+    paths:
+      exclude: ["**/internal/engine/spec/**", "**/internal/platform/config/**"]
+
+  - id: kiln-go-non-constant-time-compare
+    languages: [go]
+    severity: ERROR
+    message: Compare tokens, hashes, and signatures with subtle.ConstantTimeCompare or hmac.Equal (security-standards §11).
+    patterns:
+      - pattern-either:
+          - pattern: bytes.Equal($A, $B)
+          - pattern: $A == $B
+      # Nil checks compare no secret material.
+      - pattern-not: $A == nil
+      - metavariable-regex:
+          metavariable: $A
+          regex: (?i).*(token|hash|signature|mac|secret|digest).*
+    paths:
+      exclude: ["*_test.go"]
+
+  - id: kiln-go-sha1-for-security
+    languages: [go]
+    severity: ERROR
+    message: No SHA-1 for security purposes (security-standards §11).
+    pattern-either:
+      - pattern: sha1.New()
+      - pattern: sha1.Sum(...)
+
+  - id: kiln-go-sql-errnorows-leak
+    languages: [go]
+    severity: WARNING
+    message: sql.ErrNoRows must not leak past internal/store; map it to domain.ErrNotFound.
+    pattern: sql.ErrNoRows
+    paths:
+      exclude: ["**/internal/store/**"]
+
+  - id: kiln-ts-dangerously-set-inner-html
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: No dangerouslySetInnerHTML (CLAUDE.md; security-standards §6).
+    pattern-either:
+      - pattern: <$EL dangerouslySetInnerHTML={...} />
+      - pattern: "{dangerouslySetInnerHTML: ...}"
+
+  - id: kiln-ts-inner-html
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Do not write raw HTML into the DOM.
+    pattern-either:
+      - pattern: $EL.innerHTML = $X
+      - pattern: $EL.outerHTML = $X
+      - pattern: $EL.insertAdjacentHTML(...)
+      - pattern: document.write(...)
+
+  - id: kiln-ts-token-in-web-storage
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Never store tokens or session material in web storage (security-standards §10, T-34).
+    patterns:
+      - pattern-either:
+          - pattern: localStorage.setItem($K, ...)
+          - pattern: sessionStorage.setItem($K, ...)
+      - metavariable-regex:
+          metavariable: $K
+          regex: (?i).*(token|session|secret|auth|jwt|cookie).*
+
+  - id: kiln-ts-raw-fetch-to-api
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: All server calls go through @kiln/api-client (coding-standards §11).
+    pattern-either:
+      - pattern: fetch("=~/^\/api\//", ...)
+      - pattern: fetch(`/api/${...}`, ...)
+    paths:
+      exclude: ["packages/api-client/**"]
+
+  - id: kiln-ts-eval
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: No eval or string-compiled code (CSP forbids unsafe-eval).
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+      - pattern: setTimeout("...", ...)
+      - pattern: setInterval("...", ...)

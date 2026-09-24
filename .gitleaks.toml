@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# gitleaks config for the working-tree scan (`gitleaks dir`) only: default
+# rules, skipping gitignored build output and installed third-party packages.
+# The history scan (`gitleaks git`, see Makefile) deliberately does not use this
+# file, so nothing ever committed is excluded.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Build output and installed dependencies (gitignored, not Kiln source)"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)target/''',
+  '''(^|/)dist/''',
+  '''(^|/)coverage/''',
+  '''(^|/)\.pnpm-store/''',
+]

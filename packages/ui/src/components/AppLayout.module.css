@@ -1,0 +1,86 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The application frame. Mantine's AppShell injects a runtime <style> tag for
+   its breakpoints, which our CSP forbids (ADR-0002), so the frame is plain
+   CSS. 48em is Mantine's "sm" breakpoint. */
+
+.root {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "header"
+    "main";
+}
+
+.header {
+  grid-area: header;
+  position: sticky;
+  top: 0;
+  z-index: var(--mantine-z-index-app);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: var(--mantine-spacing-md);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+}
+
+.nav {
+  display: none;
+  padding: var(--mantine-spacing-xs);
+  border-right: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  overflow-y: auto;
+}
+
+.navOpen {
+  display: block;
+  position: fixed;
+  inset: 56px 0 0 0;
+  z-index: var(--mantine-z-index-app);
+}
+
+.main {
+  grid-area: main;
+  padding: var(--mantine-spacing-md);
+  min-width: 0;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  left: var(--mantine-spacing-md);
+  top: var(--mantine-spacing-xs);
+  z-index: var(--mantine-z-index-max);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  background: var(--mantine-color-body);
+  border: 2px solid var(--mantine-primary-color-filled);
+  border-radius: var(--mantine-radius-sm);
+}
+
+@media (min-width: 48em) {
+  .root {
+    grid-template-columns: 260px 1fr;
+    grid-template-areas:
+      "header header"
+      "nav main";
+  }
+
+  .nav,
+  .navOpen {
+    grid-area: nav;
+    display: block;
+    position: sticky;
+    top: 56px;
+    height: calc(100vh - 56px);
+    inset: auto;
+  }
+
+  .burger {
+    display: none;
+  }
+}

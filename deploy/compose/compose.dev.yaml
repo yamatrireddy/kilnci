@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Local development infrastructure only. Not for production: credentials here are
+# fixed dev values bound to loopback. Phase 1 adds NATS and MinIO.
+#
+# Dev server environment (see docs/development.md):
+#   KILN_ENV=development KILN_TLS_MODE=upstream KILN_PUBLIC_URL=http://localhost:8080
+#   KILN_DB_URL=postgres://kiln:kiln-dev-only@localhost:5432/kiln?sslmode=disable
+#   KILN_OIDC_ISSUER_URL=http://localhost:5556/dex KILN_OIDC_CLIENT_ID=kiln-dev
+#   KILN_EGRESS_ALLOWED_PREFIXES=127.0.0.1/32,::1/128
+#   KILN_AUTH_BOOTSTRAP_ADMIN_EMAILS=kilgore@kilgore.trout
+name: kiln-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
+    environment:
+      POSTGRES_USER: kiln
+      POSTGRES_DB: kiln
+      # Dev-only password, loopback-bound; never reused outside local dev.
+      POSTGRES_PASSWORD: kiln-dev-only # gitleaks:allow
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiln -d kiln"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    read_only: true
+    tmpfs:
+      - /var/run/postgresql
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.45.1@sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dex.dev.yaml:/etc/dex/config.yaml:ro
+    ports:
+      - "127.0.0.1:5556:5556"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:
