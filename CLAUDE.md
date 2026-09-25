@@ -119,7 +119,8 @@ Do not violate these without an approved ADR.
 3. **Every pipeline step runs in a container.** The `shell` executor is opt-in,
    disabled by default, and blocked for fork PRs.
 4. **Logs never go into PostgreSQL.** Chunks go to object storage; live tails over
-   NATS → WebSocket. Secrets are masked by the runner before any byte leaves it.
+   NATS → Server-Sent Events (ADR-0007). Secrets are masked by the runner before
+   any byte leaves it.
 5. **State transitions are explicit.** Use the transition functions in
    `server/internal/engine/states.go`; never set status fields directly.
 6. **Clients are thin.** No business logic or authorization decisions in web,
