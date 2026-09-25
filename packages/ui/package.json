@@ -12,18 +12,15 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "test": "vitest run",
-    "coverage": "vitest run --coverage",
-    "generate": "node scripts/build-theme-css.ts"
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@kiln/api-client": "workspace:*",
     "@kiln/core": "workspace:*",
-    "@mantine/core": "9.6.2",
-    "@mantine/hooks": "9.6.2",
-    "@mantine/notifications": "9.6.2",
     "@tabler/icons-react": "3.48.0",
     "@tanstack/react-query": "5.103.2",
-    "react-router": "8.4.0"
+    "react-router": "8.4.0",
+    "tailwindcss": "4.3.3"
   },
   "peerDependencies": {
     "react": "19.3.0",

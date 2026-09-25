@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApiError, type Member, type Org, type Role } from "@kiln/api-client";
 import { ROLES, roleAtLeast, roleLabel } from "@kiln/core";
-import { ActionIcon, Button, Group, Modal, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { notifications } from "@mantine/notifications";
 import { IconTrash, IconUserPlus } from "@tabler/icons-react";
 import { useState, type SyntheticEvent } from "react";
 
@@ -11,10 +8,27 @@ import { ConfirmModal } from "../../components/ConfirmModal";
 import { ErrorAlert, errorMessage } from "../../components/ErrorAlert";
 import { QueryState } from "../../components/QueryState";
 import { RoleBadge } from "../../components/RoleBadge";
+import {
+  Button,
+  IconButton,
+  Modal,
+  SelectField,
+  Table,
+  Td,
+  TextField,
+  Th,
+  Tooltip,
+  useDisclosure,
+  useNotify,
+} from "../../components/ui";
 import { useAddMember, useMembers, useRemoveMember, useSession, useUpdateMember } from "../../queries";
 
 const roleOptions = (allowOwner: boolean) =>
   ROLES.filter((r) => allowOwner || r !== "owner").map((r) => ({ value: r, label: roleLabel(r) }));
+
+function isRole(v: string): v is Role {
+  return (ROLES as readonly string[]).includes(v);
+}
 
 function mutationMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 409) {
@@ -31,6 +45,7 @@ export function MembersTab({ org }: { org: Org }) {
   const session = useSession();
   const update = useUpdateMember(org.slug);
   const remove = useRemoveMember(org.slug);
+  const notify = useNotify();
   const [inviteOpened, invite] = useDisclosure(false);
   const [toRemove, setToRemove] = useState<Member | null>(null);
   // UX hints only; the server enforces every rule.
@@ -38,60 +53,60 @@ export function MembersTab({ org }: { org: Org }) {
   const isOwner = org.role === "owner";
 
   return (
-    <Stack>
+    <div className="flex flex-col gap-4">
       {canManage ? (
-        <Group justify="flex-end">
+        <div className="flex justify-end">
           <Button leftSection={<IconUserPlus size={16} aria-hidden />} onClick={invite.open}>
             Add member
           </Button>
-        </Group>
+        </div>
       ) : null}
       <QueryState query={members} label="members" isEmpty={(d) => d.items.length === 0}>
         {(data) => (
-          <Table verticalSpacing="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th scope="col">Name</Table.Th>
-                <Table.Th scope="col">Email</Table.Th>
-                <Table.Th scope="col">Role</Table.Th>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Name</Th>
+                <Th>Email</Th>
+                <Th>Role</Th>
                 {canManage ? (
-                  <Table.Th scope="col">
-                    <span className="visually-hidden">Actions</span>
-                  </Table.Th>
+                  <Th className="w-12">
+                    <span className="sr-only">Actions</span>
+                  </Th>
                 ) : null}
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+              </tr>
+            </thead>
+            <tbody>
               {data.items.map((m) => {
                 const editable = canManage && (isOwner || m.role !== "owner");
                 const isSelf = m.userId === session.data?.user.id;
                 return (
-                  <Table.Tr key={m.userId}>
-                    <Table.Td>
-                      <Text fw={500} size="sm">
-                        {m.displayName}
-                        {isSelf ? " (you)" : ""}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm">{m.email}</Text>
-                    </Table.Td>
-                    <Table.Td>
+                  <tr key={m.userId}>
+                    <Td className="whitespace-nowrap font-medium">
+                      {m.displayName}
+                      {isSelf ? <span className="font-normal text-dimmed"> (you)</span> : null}
+                    </Td>
+                    <Td className="whitespace-nowrap">{m.email}</Td>
+                    <Td>
                       {editable ? (
-                        <Select
+                        <SelectField
                           aria-label={`Role for ${m.displayName}`}
-                          data={roleOptions(isOwner)}
+                          options={roleOptions(isOwner)}
                           value={m.role}
-                          allowDeselect={false}
-                          w={150}
+                          className="w-40"
                           disabled={update.isPending}
-                          onChange={(v) => {
-                            if (!v || v === m.role) return;
+                          onChange={(e) => {
+                            const v = e.currentTarget.value;
+                            if (!isRole(v) || v === m.role) return;
                             update.mutate(
                               { userId: m.userId, role: v },
                               {
-                                onSuccess: () => notifications.show({ color: "green", message: `${m.displayName} is now ${roleLabel(v)}` }),
-                                onError: (e) => notifications.show({ color: "red", title: "Role not changed", message: mutationMessage(e) }),
+                                onSuccess: () => {
+                                  notify({ color: "green", message: `${m.displayName} is now ${roleLabel(v)}` });
+                                },
+                                onError: (err) => {
+                                  notify({ color: "red", title: "Role not changed", message: mutationMessage(err) });
+                                },
                               },
                             );
                           }}
@@ -99,29 +114,28 @@ export function MembersTab({ org }: { org: Org }) {
                       ) : (
                         <RoleBadge role={m.role} />
                       )}
-                    </Table.Td>
+                    </Td>
                     {canManage ? (
-                      <Table.Td>
+                      <Td className="text-right">
                         {editable ? (
-                          <Tooltip label="Remove from organization">
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
+                          <Tooltip label="Remove from organization" describe={false}>
+                            <IconButton
+                              variant="subtle-danger"
                               aria-label={`Remove ${m.displayName}`}
                               onClick={() => {
                                 setToRemove(m);
                               }}
                             >
                               <IconTrash size={16} aria-hidden />
-                            </ActionIcon>
+                            </IconButton>
                           </Tooltip>
                         ) : null}
-                      </Table.Td>
+                      </Td>
                     ) : null}
-                  </Table.Tr>
+                  </tr>
                 );
               })}
-            </Table.Tbody>
+            </tbody>
           </Table>
         )}
       </QueryState>
@@ -140,11 +154,11 @@ export function MembersTab({ org }: { org: Org }) {
           if (!toRemove) return;
           remove.mutate(toRemove.userId, {
             onSuccess: () => {
-              notifications.show({ color: "green", message: `Removed ${toRemove.displayName}` });
+              notify({ color: "green", message: `Removed ${toRemove.displayName}` });
               setToRemove(null);
             },
             onError: (e) => {
-              notifications.show({ color: "red", title: "Not removed", message: mutationMessage(e) });
+              notify({ color: "red", title: "Not removed", message: mutationMessage(e) });
               setToRemove(null);
             },
           });
@@ -152,12 +166,13 @@ export function MembersTab({ org }: { org: Org }) {
       >
         Remove {toRemove?.displayName} ({toRemove?.email}) from {org.name}? They lose access immediately.
       </ConfirmModal>
-    </Stack>
+    </div>
   );
 }
 
 function InviteModal({ org, opened, onClose, allowOwner }: { org: Org; opened: boolean; onClose: () => void; allowOwner: boolean }) {
   const add = useAddMember(org.slug);
+  const notify = useNotify();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("developer");
   const fieldErrors = add.error instanceof ApiError ? add.error.fieldErrors() : {};
@@ -173,7 +188,7 @@ function InviteModal({ org, opened, onClose, allowOwner }: { org: Org; opened: b
       { email: email.trim(), role },
       {
         onSuccess: (m) => {
-          notifications.show({ color: "green", message: `Added ${m.email}. They can sign in with that address.` });
+          notify({ color: "green", message: `Added ${m.email}. They can sign in with that address.` });
           close();
         },
       },
@@ -181,13 +196,13 @@ function InviteModal({ org, opened, onClose, allowOwner }: { org: Org; opened: b
   };
 
   return (
-    <Modal opened={opened} onClose={close} title="Add member" centered>
+    <Modal opened={opened} onClose={close} title="Add member">
       <form onSubmit={submit} noValidate>
-        <Stack>
+        <div className="flex flex-col gap-4">
           {add.error && !(add.error instanceof ApiError && add.error.status === 422) ? (
             <ErrorAlert error={add.error} title="Could not add member" />
           ) : null}
-          <TextInput
+          <TextField
             label="Email"
             type="email"
             required
@@ -199,27 +214,27 @@ function InviteModal({ org, opened, onClose, allowOwner }: { org: Org; opened: b
             error={fieldErrors.email}
             data-autofocus
           />
-          <Select
+          <SelectField
             label="Role"
-            data={roleOptions(allowOwner)}
+            options={roleOptions(allowOwner)}
             value={role}
-            allowDeselect={false}
-            onChange={(v) => {
-              if (v) setRole(v);
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              if (isRole(v)) setRole(v);
             }}
           />
-          <Text size="xs" c="dimmed">
+          <p className="text-xs text-dimmed">
             People who have not signed in to Kiln yet are invited; they join when they first sign in with this email.
-          </Text>
-          <Group justify="flex-end">
+          </p>
+          <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="default" onClick={close}>
               Cancel
             </Button>
             <Button type="submit" loading={add.isPending} disabled={!email.includes("@")}>
               Add member
             </Button>
-          </Group>
-        </Stack>
+          </div>
+        </div>
       </form>
     </Modal>
   );

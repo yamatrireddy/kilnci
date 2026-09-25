@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { formatDateTime } from "@kiln/core";
-import { Anchor, Button, Group, Modal, Stack, Table, Text, Title } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { notifications } from "@mantine/notifications";
 import { IconPlus } from "@tabler/icons-react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 
 import { EmptyState, QueryState } from "../components/QueryState";
 import { RoleBadge } from "../components/RoleBadge";
 import { SlugNameForm } from "../components/SlugNameForm";
+import { Button, Modal, PageHeader, Table, Td, TextLink, Th, useDisclosure, useNotify } from "../components/ui";
 import { useCreateOrg, useOrgs, useSession } from "../queries";
 
 export function OrgsPage() {
@@ -17,9 +15,15 @@ export function OrgsPage() {
   const [opened, { open, close }] = useDisclosure(false);
   const create = useCreateOrg();
   const navigate = useNavigate();
+  const notify = useNotify();
   // Only instance admins may create orgs. Hiding the button is a courtesy;
   // the server enforces it.
   const canCreate = session.data?.instanceAdmin === true;
+
+  const closeModal = () => {
+    create.reset();
+    close();
+  };
 
   const createButton = canCreate ? (
     <Button leftSection={<IconPlus size={16} aria-hidden />} onClick={open}>
@@ -28,11 +32,8 @@ export function OrgsPage() {
   ) : null;
 
   return (
-    <Stack>
-      <Group justify="space-between">
-        <Title order={2}>Organizations</Title>
-        {createButton}
-      </Group>
+    <div className="flex flex-col gap-5">
+      <PageHeader title="Organizations" actions={createButton} />
       <QueryState
         query={orgs}
         label="organizations"
@@ -40,66 +41,59 @@ export function OrgsPage() {
         empty={
           <EmptyState
             title="You are not in any organization yet"
-            description={canCreate ? "Create one to get started." : "Ask an admin to invite you to an organization."}
-            action={createButton}
+            description={
+              canCreate ? "Use New organization to create one." : "Ask an admin to invite you to an organization."
+            }
           />
         }
       >
         {(data) => (
-          <Table highlightOnHover verticalSpacing="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th scope="col">Name</Table.Th>
-                <Table.Th scope="col">Slug</Table.Th>
-                <Table.Th scope="col">Your role</Table.Th>
-                <Table.Th scope="col">Created</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <Table highlightOnHover>
+            <thead>
+              <tr>
+                <Th>Name</Th>
+                <Th>Slug</Th>
+                <Th>Your role</Th>
+                <Th>Created</Th>
+              </tr>
+            </thead>
+            <tbody>
               {data.items.map((o) => (
-                <Table.Tr key={o.id}>
-                  <Table.Td>
-                    <Anchor component={Link} to={`/orgs/${o.slug}`} fw={500}>
+                <tr key={o.id}>
+                  <Td>
+                    <TextLink to={`/orgs/${o.slug}`} className="font-medium">
                       {o.name}
-                    </Anchor>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text ff="monospace" size="sm">
-                      {o.slug}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
+                    </TextLink>
+                  </Td>
+                  <Td className="whitespace-nowrap font-mono">{o.slug}</Td>
+                  <Td>
                     <RoleBadge role={o.role} />
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm" c="dimmed">
-                      {formatDateTime(o.createdAt)}
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
+                  </Td>
+                  <Td className="whitespace-nowrap text-dimmed">{formatDateTime(o.createdAt)}</Td>
+                </tr>
               ))}
-            </Table.Tbody>
+            </tbody>
           </Table>
         )}
       </QueryState>
 
-      <Modal opened={opened} onClose={close} title="New organization" centered>
+      <Modal opened={opened} onClose={closeModal} title="New organization">
         <SlugNameForm
           submitLabel="Create organization"
           pending={create.isPending}
           error={create.error}
-          onCancel={close}
+          onCancel={closeModal}
           onSubmit={(v) => {
             create.mutate(v, {
               onSuccess: (org) => {
-                close();
-                notifications.show({ color: "green", message: `Created ${org.name}` });
+                closeModal();
+                notify({ color: "green", message: `Created ${org.name}` });
                 void navigate(`/orgs/${org.slug}`);
               },
             });
           }}
         />
       </Modal>
-    </Stack>
+    </div>
   );
 }

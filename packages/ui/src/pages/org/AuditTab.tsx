@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Org } from "@kiln/api-client";
 import { formatDateTime, formatRelative } from "@kiln/core";
-import { Badge, Code, Table, Text, Tooltip } from "@mantine/core";
 
 import { QueryState } from "../../components/QueryState";
+import { Badge, Code, Table, Td, Th, Tooltip } from "../../components/ui";
 import { useAuditEvents } from "../../queries";
 
 export function AuditTab({ org }: { org: Org }) {
@@ -11,52 +11,54 @@ export function AuditTab({ org }: { org: Org }) {
   return (
     <QueryState query={events} label="audit events" isEmpty={(d) => d.items.length === 0}>
       {(data) => (
-        <Table verticalSpacing="xs" fz="sm">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th scope="col">When</Table.Th>
-              <Table.Th scope="col">Action</Table.Th>
-              <Table.Th scope="col">Actor</Table.Th>
-              <Table.Th scope="col">Target</Table.Th>
-              <Table.Th scope="col">Result</Table.Th>
-              <Table.Th scope="col">Source</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
+        <Table dense>
+          <thead>
+            <tr>
+              <Th>When</Th>
+              <Th>Action</Th>
+              <Th>Actor</Th>
+              <Th>Target</Th>
+              <Th>Result</Th>
+              <Th>Source</Th>
+            </tr>
+          </thead>
+          <tbody>
             {data.items.map((e) => (
-              <Table.Tr key={e.id}>
-                <Table.Td>
+              <tr key={e.id}>
+                <Td className="whitespace-nowrap">
                   <Tooltip label={formatDateTime(e.occurredAt)}>
-                    <Text size="sm" tabIndex={0}>
-                      {formatRelative(e.occurredAt)}
-                    </Text>
+                    <FocusableTime dateTime={e.occurredAt}>{formatRelative(e.occurredAt)}</FocusableTime>
                   </Tooltip>
-                </Table.Td>
-                <Table.Td>
+                </Td>
+                <Td className="whitespace-nowrap">
                   <Code>{e.action}</Code>
-                </Table.Td>
-                <Table.Td>
+                </Td>
+                <Td className="whitespace-nowrap">
                   {e.actorKind}:{e.actorId.slice(-6)}
-                </Table.Td>
-                <Table.Td>
+                </Td>
+                <Td className="whitespace-nowrap">
                   {e.targetType}
                   {e.targetId ? `:${e.targetId.slice(-6)}` : ""}
-                </Table.Td>
-                <Table.Td>
-                  <Badge color={e.result === "success" ? "green" : "red"} variant="light">
-                    {e.result}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" c="dimmed">
-                    {e.sourceIp}
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
+                </Td>
+                <Td>
+                  <Badge color={e.result === "success" ? "green" : "red"}>{e.result}</Badge>
+                </Td>
+                <Td className="whitespace-nowrap text-xs text-dimmed">{e.sourceIp}</Td>
+              </tr>
             ))}
-          </Table.Tbody>
+          </tbody>
         </Table>
       )}
     </QueryState>
+  );
+}
+
+/** A <time> keyboard users can focus to reveal its exact-time tooltip. */
+function FocusableTime({ dateTime, children, ...rest }: { dateTime: string; children: string; "aria-describedby"?: string }) {
+  return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focus only reveals the tooltip (WCAG 2.1.1); there is no action.
+    <time dateTime={dateTime} tabIndex={0} className="rounded-sm" {...rest}>
+      {children}
+    </time>
   );
 }

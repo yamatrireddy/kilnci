@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { roleAtLeast } from "@kiln/core";
-import { Anchor, Breadcrumbs, Group, Stack, Tabs, Text, Title } from "@mantine/core";
-import { Link, useParams, useSearchParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 
 import { QueryState } from "../components/QueryState";
 import { RoleBadge } from "../components/RoleBadge";
+import { Breadcrumbs, PageHeader, Tabs } from "../components/ui";
 import { useOrg } from "../queries";
 import { AuditTab } from "./org/AuditTab";
 import { MembersTab } from "./org/MembersTab";
@@ -24,48 +24,34 @@ export function OrgPage() {
     <QueryState query={org} label="organization">
       {(o) => {
         const isAdmin = roleAtLeast(o.role, "admin");
+        const tabs: { value: Tab; label: string }[] = [
+          { value: "projects", label: "Projects" },
+          { value: "members", label: "Members" },
+          ...(isAdmin ? [{ value: "audit" as const, label: "Audit log" }] : []),
+        ];
+        // A non-admin who follows a ?tab=audit link lands on Projects.
+        const current: Tab = tabs.some((t) => t.value === tab) ? tab : "projects";
         return (
-          <Stack>
-            <Breadcrumbs>
-              <Anchor component={Link} to="/orgs">
-                Organizations
-              </Anchor>
-              <Text>{o.name}</Text>
-            </Breadcrumbs>
-            <Group justify="space-between">
-              <div>
-                <Title order={2}>{o.name}</Title>
-                <Text c="dimmed" ff="monospace" size="sm">
-                  {o.slug}
-                </Text>
-              </div>
-              <RoleBadge role={o.role} />
-            </Group>
+          <div className="flex flex-col gap-5">
+            <Breadcrumbs items={[{ label: "Organizations", to: "/orgs" }, { label: o.name }]} />
+            <PageHeader
+              title={o.name}
+              subtitle={<span className="font-mono">{o.slug}</span>}
+              actions={<RoleBadge role={o.role} />}
+            />
             <Tabs
-              value={tab}
+              label={`${o.name} sections`}
+              value={current}
+              tabs={tabs}
               onChange={(v) => {
-                setParams(v && v !== "projects" ? { tab: v } : {}, { replace: true });
+                setParams(v !== "projects" ? { tab: v } : {}, { replace: true });
               }}
-              keepMounted={false}
             >
-              <Tabs.List>
-                <Tabs.Tab value="projects">Projects</Tabs.Tab>
-                <Tabs.Tab value="members">Members</Tabs.Tab>
-                {isAdmin ? <Tabs.Tab value="audit">Audit log</Tabs.Tab> : null}
-              </Tabs.List>
-              <Tabs.Panel value="projects" pt="md">
-                <ProjectsTab org={o} />
-              </Tabs.Panel>
-              <Tabs.Panel value="members" pt="md">
-                <MembersTab org={o} />
-              </Tabs.Panel>
-              {isAdmin ? (
-                <Tabs.Panel value="audit" pt="md">
-                  <AuditTab org={o} />
-                </Tabs.Panel>
-              ) : null}
+              {current === "projects" ? <ProjectsTab org={o} /> : null}
+              {current === "members" ? <MembersTab org={o} /> : null}
+              {current === "audit" ? <AuditTab org={o} /> : null}
             </Tabs>
-          </Stack>
+          </div>
         );
       }}
     </QueryState>
