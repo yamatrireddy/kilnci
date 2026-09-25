@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# "push:" with no body means every branch; pull requests are off.
+version: 1
+on:
+  push:
+jobs:
+  build:
+    image: localhost:5000/team/builder:1.0
+    steps:
+      - run: make

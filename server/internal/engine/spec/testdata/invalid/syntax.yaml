@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: invalid YAML syntax
+version: 1
+jobs: [

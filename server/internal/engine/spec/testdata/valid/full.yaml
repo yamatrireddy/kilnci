@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+version: 1
+on:
+  push:
+    branches: [main, "release/*"]
+  pull_request:
+    branches: [main]
+env:
+  GOFLAGS: -mod=readonly
+  RETRIES: 3
+jobs:
+  lint:
+    image: golangci/golangci-lint:v2.4
+    steps:
+      - run: golangci-lint run ./...
+  test:
+    image: golang:1.27
+    runs-on: [linux, amd64]
+    needs: [lint]
+    timeout: 20m
+    retries: 1
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Unit tests
+        run: |
+          go test ./...
+        timeout: 10m
+        env:
+          VERBOSE: true
+  deploy:
+    image: ghcr.io/example/deployer@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    needs: [test, lint]
+    steps:
+      - run: echo "$KILN_BRANCH"

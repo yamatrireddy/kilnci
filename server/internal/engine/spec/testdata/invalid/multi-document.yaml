@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: only one YAML document
+version: 1
+jobs:
+  a:
+    image: alpine:3.22
+    steps: [{run: x}]
+---
+version: 1
