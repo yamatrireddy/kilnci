@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApiError } from "@kiln/api-client";
-import { Alert, Code, Text } from "@mantine/core";
-import { IconAlertTriangle } from "@tabler/icons-react";
+
+import { Alert, Code } from "./ui";
 
 /** User-facing text for an error; never includes internal details. */
 export function errorMessage(error: unknown): string {
@@ -29,12 +29,12 @@ export function errorMessage(error: unknown): string {
 export function ErrorAlert({ error, title = "Something went wrong" }: { error: unknown; title?: string }) {
   const requestId = error instanceof ApiError ? error.problem?.requestId : undefined;
   return (
-    <Alert color="red" variant="light" title={title} icon={<IconAlertTriangle aria-hidden />} role="alert">
-      <Text size="sm">{errorMessage(error)}</Text>
+    <Alert tone="red" title={title} role="alert">
+      <p>{errorMessage(error)}</p>
       {requestId ? (
-        <Text size="xs" c="dimmed" mt="xs">
+        <p className="mt-2 text-xs opacity-80">
           Request ID: <Code>{requestId}</Code>
-        </Text>
+        </p>
       ) : null}
     </Alert>
   );

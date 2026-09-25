@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # ADR-0002: Mantine as the UI framework for web and desktop
 
-- **Status:** Accepted (maintainer decision, 2026-09-23)
+- **Status:** Superseded by [ADR-0004](0004-web-ui-tailwind-css.md) (2026-09-26)
 - **Date:** 2026-09-24
 
 ## Context

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -6,7 +7,9 @@ import { defineConfig } from "vite";
 // origin (http://localhost:5173) and cookies stay first-party. Set
 // KILN_PUBLIC_URL=http://localhost:5173 on the server to match.
 export default defineConfig({
-  plugins: [react()],
+  // Tailwind compiles @kiln/ui/styles.css to a static stylesheet at build
+  // time; nothing is injected at runtime (ADR-0004, strict CSP).
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
     strictPort: true,

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Center, Loader, Stack, Text, ThemeIcon, Title } from "@mantine/core";
 import { IconInbox } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 
 import { ErrorAlert } from "./ErrorAlert";
+import { RoundIcon, Spinner } from "./ui";
 
 export interface QueryLike<T> {
   isPending: boolean;
@@ -32,9 +32,9 @@ export function QueryState<T>({
 }) {
   if (query.isPending) {
     return (
-      <Center py="xl">
-        <Loader aria-label={`Loading ${label}`} role="status" />
-      </Center>
+      <div className="flex justify-center py-12">
+        <Spinner label={`Loading ${label}`} />
+      </div>
     );
   }
   if (query.isError || query.data === undefined) {
@@ -48,21 +48,15 @@ export function QueryState<T>({
 
 export function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return (
-    <Center py="xl">
-      <Stack align="center" gap="xs" maw={420}>
-        <ThemeIcon size="xl" variant="light" radius="xl" aria-hidden>
-          <IconInbox />
-        </ThemeIcon>
-        <Title order={3} size="h4" ta="center">
-          {title}
-        </Title>
-        {description ? (
-          <Text c="dimmed" ta="center" size="sm">
-            {description}
-          </Text>
-        ) : null}
-        {action}
-      </Stack>
-    </Center>
+    <div className="flex justify-center px-4 py-12">
+      <div className="flex max-w-[420px] flex-col items-center gap-2 text-center">
+        <RoundIcon>
+          <IconInbox size={24} />
+        </RoundIcon>
+        <h3 className="mt-1 text-lg text-fg">{title}</h3>
+        {description ? <p className="text-sm text-dimmed">{description}</p> : null}
+        {action ? <div className="mt-2">{action}</div> : null}
+      </div>
+    </div>
   );
 }

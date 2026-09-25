@@ -29,10 +29,11 @@ only summarizes them.
 ## Current status
 
 - **Active phase:** Phase 0 — Foundations, implemented and pending maintainer review
-  (see `docs/roadmap.md`). Server, web (Mantine), and desktop (Tauri) exist;
+  (see `docs/roadmap.md`). Server, web (React + Tailwind CSS), and desktop (Tauri) exist;
   `runner/`, `cli/`, `proto/`, and `apps/mobile` do not yet.
 - **Stable contracts:** none yet. Treat `docs/api/openapi.yaml` and `proto/` as draft.
-- **UI:** Mantine 9 for web and desktop, with no runtime style injection (ADR-0002).
+- **UI:** Tailwind CSS 4 with native-element primitives in `packages/ui` for web and
+  desktop; build-time CSS only, no runtime style injection (ADR-0004).
 - **Security target:** OWASP ASVS v4 Level 2 for the server and web app.
 - Update this section when a phase completes.
 

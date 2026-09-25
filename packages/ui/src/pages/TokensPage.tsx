@@ -1,31 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApiError, type APIToken, type Permission } from "@kiln/api-client";
 import { formatDateTime, formatRelative } from "@kiln/core";
-import {
-  ActionIcon,
-  Alert,
-  Button,
-  Checkbox,
-  Code,
-  CopyButton,
-  Group,
-  Modal,
-  NumberInput,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  Title,
-  Tooltip,
-} from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { notifications } from "@mantine/notifications";
 import { IconCheck, IconCopy, IconKey, IconTrash } from "@tabler/icons-react";
-import { useState, type SyntheticEvent } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ErrorAlert } from "../components/ErrorAlert";
 import { EmptyState, QueryState } from "../components/QueryState";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  CheckboxGroup,
+  Code,
+  IconButton,
+  Modal,
+  PageHeader,
+  Table,
+  Td,
+  TextField,
+  Th,
+  Tooltip,
+  useDisclosure,
+  useNotify,
+} from "../components/ui";
 import { useCreateToken, useRevokeToken, useTokens } from "../queries";
 
 const SCOPES: { value: Permission; label: string }[] = [
@@ -41,80 +39,74 @@ const SCOPES: { value: Permission; label: string }[] = [
 export function TokensPage() {
   const tokens = useTokens();
   const revoke = useRevokeToken();
+  const notify = useNotify();
   const [createOpened, create] = useDisclosure(false);
   const [toRevoke, setToRevoke] = useState<APIToken | null>(null);
 
-  const button = (
-    <Button leftSection={<IconKey size={16} aria-hidden />} onClick={create.open}>
-      New token
-    </Button>
-  );
-
   return (
-    <Stack>
-      <Group justify="space-between">
-        <Title order={2}>API tokens</Title>
-        {button}
-      </Group>
-      <Text c="dimmed" size="sm">
-        Personal tokens for scripts and the CLI. They act as you, limited to the permissions you choose, and are
-        read-only for now. Treat them like passwords.
-      </Text>
+    <div className="flex flex-col gap-5">
+      <PageHeader
+        title="API tokens"
+        subtitle={
+          <p className="max-w-prose">
+            Personal tokens for scripts and the CLI. They act as you, limited to the permissions you choose, and are
+            read-only for now. Treat them like passwords.
+          </p>
+        }
+        actions={
+          <Button leftSection={<IconKey size={16} aria-hidden />} onClick={create.open}>
+            New token
+          </Button>
+        }
+      />
       <QueryState
         query={tokens}
         label="API tokens"
         isEmpty={(d) => d.items.length === 0}
-        empty={<EmptyState title="No API tokens" action={button} />}
+        empty={<EmptyState title="No API tokens" description="Use New token to create one." />}
       >
         {(data) => (
-          <Table verticalSpacing="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th scope="col">Name</Table.Th>
-                <Table.Th scope="col">Token</Table.Th>
-                <Table.Th scope="col">Permissions</Table.Th>
-                <Table.Th scope="col">Last used</Table.Th>
-                <Table.Th scope="col">Expires</Table.Th>
-                <Table.Th scope="col">
-                  <span className="visually-hidden">Actions</span>
-                </Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Name</Th>
+                <Th>Token</Th>
+                <Th>Permissions</Th>
+                <Th>Last used</Th>
+                <Th>Expires</Th>
+                <Th className="w-12">
+                  <span className="sr-only">Actions</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
               {data.items.map((t) => (
-                <Table.Tr key={t.id}>
-                  <Table.Td fw={500}>{t.name}</Table.Td>
-                  <Table.Td>
+                <tr key={t.id}>
+                  <Td className="whitespace-nowrap font-medium">{t.name}</Td>
+                  <Td className="whitespace-nowrap">
                     <Code>{t.prefix}…</Code>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs">{t.scopes.join(", ")}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm" c="dimmed">
-                      {t.lastUsedAt ? formatRelative(t.lastUsedAt) : "Never"}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm">{formatDateTime(t.expiresAt)}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Tooltip label="Revoke token">
-                      <ActionIcon
-                        color="red"
-                        variant="subtle"
+                  </Td>
+                  <Td className="min-w-48 text-xs">{t.scopes.join(", ")}</Td>
+                  <Td className="whitespace-nowrap text-dimmed">
+                    {t.lastUsedAt ? formatRelative(t.lastUsedAt) : "Never"}
+                  </Td>
+                  <Td className="whitespace-nowrap">{formatDateTime(t.expiresAt)}</Td>
+                  <Td className="text-right">
+                    <Tooltip label="Revoke token" describe={false}>
+                      <IconButton
+                        variant="subtle-danger"
                         aria-label={`Revoke ${t.name}`}
                         onClick={() => {
                           setToRevoke(t);
                         }}
                       >
                         <IconTrash size={16} aria-hidden />
-                      </ActionIcon>
+                      </IconButton>
                     </Tooltip>
-                  </Table.Td>
-                </Table.Tr>
+                  </Td>
+                </tr>
               ))}
-            </Table.Tbody>
+            </tbody>
           </Table>
         )}
       </QueryState>
@@ -133,7 +125,7 @@ export function TokensPage() {
           if (!toRevoke) return;
           revoke.mutate(toRevoke.id, {
             onSuccess: () => {
-              notifications.show({ color: "green", message: `Revoked ${toRevoke.name}` });
+              notify({ color: "green", message: `Revoked ${toRevoke.name}` });
               setToRevoke(null);
             },
           });
@@ -141,17 +133,27 @@ export function TokensPage() {
       >
         Revoke {toRevoke?.name}? Anything using it stops working immediately.
       </ConfirmModal>
-    </Stack>
+    </div>
   );
 }
+
+const MIN_DAYS = 1;
+const MAX_DAYS = 365;
 
 function CreateTokenModal({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const create = useCreateToken();
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<Permission[]>(["orgs:list", "orgs:read", "projects:list", "projects:read"]);
-  const [days, setDays] = useState<number>(30);
+  const [daysText, setDaysText] = useState("30");
   const [secret, setSecret] = useState<string | null>(null);
   const fieldErrors = create.error instanceof ApiError ? create.error.fieldErrors() : {};
+  const days = Number(daysText);
+  const daysValid = Number.isInteger(days) && days >= MIN_DAYS && days <= MAX_DAYS;
+
+  // Leaving the page with the secret on screen skips close(); drop the
+  // mutation result (which holds the token) from the cache then too.
+  const { reset } = create;
+  useEffect(() => reset, [reset]);
 
   const close = () => {
     // Drop the secret from memory as soon as the dialog closes.
@@ -162,6 +164,7 @@ function CreateTokenModal({ opened, onClose }: { opened: boolean; onClose: () =>
   };
   const submit = (e: SyntheticEvent) => {
     e.preventDefault();
+    if (!daysValid) return;
     create.mutate(
       { name: name.trim(), scopes, expiresInDays: days },
       {
@@ -173,41 +176,38 @@ function CreateTokenModal({ opened, onClose }: { opened: boolean; onClose: () =>
   };
 
   return (
-    <Modal opened={opened} onClose={close} title={secret ? "Copy your new token" : "New API token"} centered size="lg">
+    <Modal opened={opened} onClose={close} title={secret ? "Copy your new token" : "New API token"} size="lg">
       {secret ? (
-        <Stack>
-          <Alert color="yellow" variant="light">
-            This is the only time the token is shown. Store it in a password manager or secret store.
-          </Alert>
-          <Group gap="xs" wrap="nowrap">
-            <Code block style={{ flex: 1, wordBreak: "break-all" }} aria-label="New API token">
+        <div className="flex flex-col gap-4">
+          <Alert tone="yellow">This is the only time the token is shown. Store it in a password manager or secret store.</Alert>
+          <div className="flex items-start gap-2">
+            <div
+              role="textbox"
+              aria-readonly="true"
+              aria-label="New API token"
+              tabIndex={0}
+              className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded-md border border-line bg-subtle px-3 py-2 font-mono text-sm text-fg"
+            >
               {secret}
-            </Code>
-            <CopyButton value={secret} timeout={2000}>
-              {({ copied, copy }) => (
-                <Tooltip label={copied ? "Copied" : "Copy"}>
-                  <ActionIcon variant="light" onClick={copy} aria-label="Copy token">
-                    {copied ? <IconCheck size={16} aria-hidden /> : <IconCopy size={16} aria-hidden />}
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </CopyButton>
-          </Group>
-          <Group justify="flex-end">
+            </div>
+            <CopyButton value={secret} />
+          </div>
+          <div className="flex justify-end">
             <Button onClick={close}>Done</Button>
-          </Group>
-        </Stack>
+          </div>
+        </div>
       ) : (
         <form onSubmit={submit} noValidate>
-          <Stack>
+          <div className="flex flex-col gap-4">
             {create.error && !(create.error instanceof ApiError && create.error.status === 422) ? (
               <ErrorAlert error={create.error} title="Could not create token" />
             ) : null}
-            <TextInput
+            <TextField
               label="Name"
               description="What will use this token? For example, “CI deploy script”."
               required
               maxLength={100}
+              autoComplete="off"
               value={name}
               onChange={(e) => {
                 setName(e.currentTarget.value);
@@ -215,41 +215,89 @@ function CreateTokenModal({ opened, onClose }: { opened: boolean; onClose: () =>
               error={fieldErrors.name}
               data-autofocus
             />
-            <Checkbox.Group
-              label="Permissions"
-              value={scopes}
-              onChange={(v) => {
-                setScopes(v);
-              }}
-              error={fieldErrors.scopes}
-            >
-              <Stack gap="xs" mt="xs">
-                {SCOPES.map((s) => (
-                  <Checkbox key={s.value} value={s.value} label={`${s.label} (${s.value})`} />
-                ))}
-              </Stack>
-            </Checkbox.Group>
-            <NumberInput
+            <CheckboxGroup legend="Permissions" error={fieldErrors.scopes}>
+              {SCOPES.map((s) => (
+                <Checkbox
+                  key={s.value}
+                  value={s.value}
+                  checked={scopes.includes(s.value)}
+                  onChange={(e) => {
+                    const on = e.currentTarget.checked;
+                    setScopes((cur) => (on ? [...cur, s.value] : cur.filter((v) => v !== s.value)));
+                  }}
+                  label={
+                    <>
+                      {s.label} <span className="font-mono text-xs text-dimmed">({s.value})</span>
+                    </>
+                  }
+                />
+              ))}
+            </CheckboxGroup>
+            <TextField
               label="Expires in (days)"
-              min={1}
-              max={365}
-              value={days}
-              onChange={(v) => {
-                setDays(typeof v === "number" ? v : 30);
+              type="number"
+              inputMode="numeric"
+              min={MIN_DAYS}
+              max={MAX_DAYS}
+              step={1}
+              className="sm:max-w-40"
+              value={daysText}
+              onChange={(e) => {
+                setDaysText(e.currentTarget.value);
               }}
-              error={fieldErrors.expiresInDays}
+              error={daysValid ? fieldErrors.expiresInDays : `Enter a whole number from ${String(MIN_DAYS)} to ${String(MAX_DAYS)}`}
             />
-            <Group justify="flex-end">
+            <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button variant="default" onClick={close}>
                 Cancel
               </Button>
-              <Button type="submit" loading={create.isPending} disabled={!name.trim() || scopes.length === 0}>
+              <Button type="submit" loading={create.isPending} disabled={!name.trim() || scopes.length === 0 || !daysValid}>
                 Create token
               </Button>
-            </Group>
-          </Stack>
+            </div>
+          </div>
         </form>
       )}
     </Modal>
+  );
+}
+
+function CopyButton({ value }: { value: string }) {
+  const notify = useNotify();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => {
+      setCopied(false);
+    }, 2000);
+    return () => {
+      clearTimeout(t);
+    };
+  }, [copied]);
+
+  return (
+    <Tooltip label={copied ? "Copied" : "Copy"} describe={false}>
+      <IconButton
+        variant="light"
+        aria-label={copied ? "Token copied" : "Copy token"}
+        onClick={() => {
+          // The token is shown only once, so a failed copy must be visible.
+          // Wrapped in a promise: navigator.clipboard is undefined outside
+          // secure contexts, which would otherwise throw synchronously.
+          Promise.resolve()
+            .then(() => navigator.clipboard.writeText(value))
+            .then(
+            () => {
+              setCopied(true);
+            },
+            () => {
+              notify({ color: "red", title: "Copy failed", message: "Select the token and copy it manually." });
+            },
+          );
+        }}
+      >
+        {copied ? <IconCheck size={16} aria-hidden /> : <IconCopy size={16} aria-hidden />}
+      </IconButton>
+    </Tooltip>
   );
 }

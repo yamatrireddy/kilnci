@@ -15,8 +15,8 @@ import (
 
 // webCSP is the Content Security Policy for the web app's documents: no
 // inline scripts or styles, no eval, no framing, and API calls same-origin
-// only (security-standards §10). Mantine's CSS variables are shipped as a
-// static stylesheet (ADR-0002) so no 'unsafe-inline' is needed.
+// only (security-standards §10). The UI's styles are compiled at build time
+// into a static stylesheet (ADR-0004) so no 'unsafe-inline' is needed.
 const webCSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
 	"font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
 	"form-action 'self'; frame-ancestors 'none'"

@@ -49,5 +49,7 @@ make lint-rust  # clippy for the desktop shell
   from `docs/api/openapi.yaml`; `TestRoutesMatchSpec` and `TestAuthzMatrix` keep the
   two and the authorization policy in sync.
 - UI screens live in `packages/ui`; `apps/web` and `apps/desktop` only provide a
-  `Platform` (API client, sign-in). Do not use Mantine components that inject
-  `<style>` at runtime (ADR-0002); ESLint blocks them.
+  `Platform` (API client, sign-in). Style with Tailwind classes and the
+  primitives in `packages/ui/src/components/ui`; theme tokens live in
+  `packages/ui/src/styles.css`. Nothing may inject `<style>` at runtime
+  (ADR-0004); a test and ESLint enforce it.

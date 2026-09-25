@@ -4,7 +4,7 @@
 //
 // Fails the build if <dist>/index.html contains anything the production CSP
 // (script-src 'self'; style-src 'self') would block: inline scripts, inline
-// <style>, style attributes, or inline event handlers (ADR-0002).
+// <style>, style attributes, or inline event handlers (ADR-0004).
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 

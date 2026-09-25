@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Button, Group, Modal, Text } from "@mantine/core";
 import type { ReactNode } from "react";
+
+import { Button, Modal } from "./ui";
 
 /** Confirmation for destructive actions (coding-standards §11). */
 export function ConfirmModal({
@@ -21,16 +22,16 @@ export function ConfirmModal({
   onClose: () => void;
 }) {
   return (
-    <Modal opened={opened} onClose={onClose} title={title} centered>
-      <Text size="sm">{children}</Text>
-      <Group justify="flex-end" mt="lg">
+    <Modal opened={opened} onClose={onClose} title={title}>
+      <p className="text-sm text-fg">{children}</p>
+      <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button variant="default" onClick={onClose}>
           Cancel
         </Button>
-        <Button color="red" onClick={onConfirm} loading={loading ?? false}>
+        <Button variant="danger" onClick={onConfirm} loading={loading ?? false}>
           {confirmLabel}
         </Button>
-      </Group>
+      </div>
     </Modal>
   );
 }

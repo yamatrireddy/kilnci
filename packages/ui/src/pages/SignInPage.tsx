@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { safeReturnPath, signInErrorMessage } from "@kiln/core";
-import { Alert, Button, Center, Paper, Stack, Text, Title } from "@mantine/core";
 import { IconFlame, IconLogin } from "@tabler/icons-react";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 
+import { Alert, Button } from "../components/ui";
 import { usePlatform } from "../platform";
 
 export function SignInPage() {
@@ -15,25 +15,24 @@ export function SignInPage() {
   const returnTo = safeReturnPath(params.get("returnTo"));
 
   return (
-    <Center component="main" mih="100vh" p="md">
-      <Paper withBorder shadow="sm" p="xl" radius="lg" maw={420} w="100%">
-        <Stack gap="md">
-          <Stack gap={4} align="center">
-            <IconFlame size={40} aria-hidden color="var(--mantine-color-kiln-6)" />
-            <Title order={1} size="h2">
-              Sign in to {name}
-            </Title>
-            <Text c="dimmed" size="sm" ta="center">
+    <main className="grid min-h-screen place-items-center bg-subtle p-4">
+      <div className="w-full max-w-[420px] rounded-xl border border-line bg-surface p-6 shadow-sm sm:p-8">
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col items-center gap-1 text-center">
+            <IconFlame size={40} aria-hidden className="text-kiln-600 dark:text-kiln-400" />
+            <h1 className="mt-1 text-2xl">Sign in to {name}</h1>
+            <p className="text-sm text-dimmed">
               Kiln uses your organization&apos;s identity provider. You will be redirected to sign in.
-            </Text>
-          </Stack>
+            </p>
+          </div>
           {error ? (
-            <Alert color="red" variant="light" role="alert">
+            <Alert tone="red" role="alert">
               {error}
             </Alert>
           ) : null}
           <Button
-            size="md"
+            size="lg"
+            fullWidth
             leftSection={<IconLogin size={18} aria-hidden />}
             loading={busy}
             onClick={() => {
@@ -45,8 +44,8 @@ export function SignInPage() {
           >
             Continue with single sign-on
           </Button>
-        </Stack>
-      </Paper>
-    </Center>
+        </div>
+      </div>
+    </main>
   );
 }

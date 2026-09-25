@@ -45,6 +45,10 @@ export default tseslint.config(
           selector: "MemberExpression[property.name=/^(innerHTML|outerHTML)$/]",
           message: "Do not write raw HTML into the DOM.",
         },
+        {
+          selector: "JSXOpeningElement[name.name='style']",
+          message: "No <style> elements: the CSP forbids inline styles (ADR-0004). Use Tailwind classes.",
+        },
       ],
       "no-restricted-globals": [
         "error",
@@ -54,18 +58,17 @@ export default tseslint.config(
     },
   },
   {
-    // ADR-0002: these Mantine components inject <style> tags at runtime,
-    // which the strict CSP blocks. Use CSS modules instead.
+    // ADR-0004: styling is Tailwind compiled at build time. Runtime style
+    // injection is blocked by the strict CSP, and Mantine was replaced.
     files: ["packages/ui/**/*.{ts,tsx}", "apps/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
-          paths: [
+          patterns: [
             {
-              name: "@mantine/core",
-              importNames: ["AppShell", "Grid", "SimpleGrid", "Flex", "ColorSchemeScript", "InlineStyles"],
-              message: "Injects runtime <style>/<script> blocked by CSP (ADR-0002). Use a CSS module.",
+              group: ["@mantine/*"],
+              message: "Mantine was replaced by Tailwind CSS (ADR-0004). Use @kiln/ui primitives.",
             },
           ],
         },

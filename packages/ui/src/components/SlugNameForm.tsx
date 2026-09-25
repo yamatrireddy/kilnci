@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApiError } from "@kiln/api-client";
-import { Button, Group, Stack, TextInput } from "@mantine/core";
 import { useState, type SyntheticEvent } from "react";
 
 import { ErrorAlert } from "./ErrorAlert";
+import { Button, TextField } from "./ui";
 
 /** Suggests a slug from a display name: lowercase, hyphenated, 40 chars max. */
 export function slugify(name: string): string {
@@ -48,12 +48,13 @@ export function SlugNameForm({
 
   return (
     <form onSubmit={submit} noValidate>
-      <Stack>
+      <div className="flex flex-col gap-4">
         {error && !(error instanceof ApiError && error.status === 422) ? <ErrorAlert error={error} /> : null}
-        <TextInput
+        <TextField
           label="Name"
           required
           maxLength={100}
+          autoComplete="off"
           value={name}
           onChange={(e) => {
             setName(e.currentTarget.value);
@@ -61,11 +62,14 @@ export function SlugNameForm({
           error={fieldErrors.name}
           data-autofocus
         />
-        <TextInput
+        <TextField
           label="Slug"
           description="Used in URLs. Lowercase letters, digits, and single hyphens."
           required
           maxLength={40}
+          autoComplete="off"
+          spellCheck={false}
+          className="font-mono"
           value={effectiveSlug}
           onChange={(e) => {
             setSlugTouched(true);
@@ -73,15 +77,15 @@ export function SlugNameForm({
           }}
           error={slugInvalid ? "Use lowercase letters, digits, and single hyphens" : fieldErrors.slug}
         />
-        <Group justify="flex-end">
+        <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="default" onClick={onCancel}>
             Cancel
           </Button>
           <Button type="submit" loading={pending} disabled={!name.trim() || !effectiveSlug || slugInvalid}>
             {submitLabel}
           </Button>
-        </Group>
-      </Stack>
+        </div>
+      </div>
     </form>
   );
 }

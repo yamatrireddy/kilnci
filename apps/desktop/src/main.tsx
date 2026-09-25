@@ -7,7 +7,6 @@ import "@kiln/ui/styles.css";
 import { createKilnClient } from "@kiln/api-client";
 import { queryKeys } from "@kiln/core";
 import { createQueryClient, KilnProvider, kilnRoutes, type Platform } from "@kiln/ui";
-import { MantineProvider } from "@mantine/core";
 import { invoke } from "@tauri-apps/api/core";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -57,13 +56,11 @@ function App() {
   if (server === undefined) return null;
   if (server === null) {
     return (
-      <MantineProvider withCssVariables={false} withGlobalClasses={false} defaultColorScheme="auto">
-        <ServerSetup
-          onSave={async (url) => {
-            setServer(await invoke<string>("set_server_url", { url }));
-          }}
-        />
-      </MantineProvider>
+      <ServerSetup
+        onSave={async (url) => {
+          setServer(await invoke<string>("set_server_url", { url }));
+        }}
+      />
     );
   }
   return (

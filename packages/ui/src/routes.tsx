@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ApiError } from "@kiln/api-client";
-import { Anchor, Center, Loader, Stack, Text, Title } from "@mantine/core";
-import { Link, Navigate, useLocation, type RouteObject } from "react-router";
+import { Navigate, useLocation, type RouteObject } from "react-router";
 
 import { AppLayout } from "./components/AppLayout";
 import { ErrorAlert } from "./components/ErrorAlert";
+import { Spinner, TextLink } from "./components/ui";
 import { OrgPage } from "./pages/OrgPage";
 import { OrgsPage } from "./pages/OrgsPage";
 import { ProjectPage } from "./pages/ProjectPage";
@@ -18,9 +18,9 @@ function RequireSession() {
   const location = useLocation();
   if (session.isPending) {
     return (
-      <Center mih="100vh">
-        <Loader aria-label="Loading your session" role="status" />
-      </Center>
+      <div className="grid min-h-screen place-items-center">
+        <Spinner label="Loading your session" />
+      </div>
     );
   }
   if (session.error instanceof ApiError && session.error.status === 401) {
@@ -29,9 +29,11 @@ function RequireSession() {
   }
   if (session.isError) {
     return (
-      <Center mih="100vh" p="md">
-        <ErrorAlert error={session.error} title="Could not reach Kiln" />
-      </Center>
+      <main className="grid min-h-screen place-items-center p-4">
+        <div className="w-full max-w-md">
+          <ErrorAlert error={session.error} title="Could not reach Kiln" />
+        </div>
+      </main>
     );
   }
   return <AppLayout session={session.data} />;
@@ -39,15 +41,13 @@ function RequireSession() {
 
 export function NotFoundPage() {
   return (
-    <Center py="xl">
-      <Stack align="center" gap="xs">
-        <Title order={2}>Page not found</Title>
-        <Text c="dimmed">This page does not exist, or you do not have access to it.</Text>
-        <Anchor component={Link} to="/orgs">
-          Go to your organizations
-        </Anchor>
-      </Stack>
-    </Center>
+    <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
+      <h2 className="text-2xl text-fg">Page not found</h2>
+      <p className="text-dimmed">This page does not exist, or you do not have access to it.</p>
+      <TextLink to="/orgs" className="mt-2 font-medium">
+        Go to your organizations
+      </TextLink>
+    </div>
   );
 }
 
