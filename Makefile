@@ -129,7 +129,16 @@ lint-rust: ## clippy for the desktop shell
 ## ---------------------------------------------------------------- security
 
 .PHONY: security
-security: sec-gitleaks sec-gosec sec-govulncheck sec-osv sec-pnpm-audit sec-semgrep sec-trivy license-check ## All security scanners
+security: sec-gitleaks sec-gosec sec-govulncheck sec-osv sec-pnpm-audit sec-lockfile-age sec-semgrep sec-trivy license-check ## All security scanners
+
+# Lockfile entries added since LOCKFILE_BASE must be >= 7 days old on npm (T-48).
+# CI compares the PR merge commit with its base; locally, the default is origin/main.
+LOCKFILE_BASE ?= origin/main
+
+.PHONY: sec-lockfile-age
+sec-lockfile-age: ## New pnpm-lock.yaml entries against the 7-day release-age gate
+	node --test "scripts/*.test.mjs"
+	node scripts/check-lockfile-age.mjs --base "$(LOCKFILE_BASE)"
 
 .PHONY: sec-gitleaks
 sec-gitleaks:

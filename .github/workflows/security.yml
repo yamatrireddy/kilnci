@@ -131,6 +131,45 @@ jobs:
           fail-on-severity: high
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
 
+  # pnpm enforces minimumReleaseAge only when resolving; a frozen-lockfile install
+  # trusts the lockfile. This gate rejects PRs whose lockfile adds package
+  # versions published to npm less than 7 days ago (T-48). No secrets, no token.
+  lockfile-age:
+    name: lockfile release age
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR merge commit plus its first parent (the base it merges into).
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: new lockfile entries are at least 7 days old
+        run: |
+          # HEAD must be the synthetic PR merge commit, so HEAD^1 is exactly the
+          # base branch and the diff is exactly what merging would introduce.
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+          # Run the base branch's copy of the gate so a PR cannot weaken the
+          # check that judges it. The PR's copy is used only when the base has
+          # none, i.e. for the PR that introduces the gate.
+          gate="$RUNNER_TEMP/check-lockfile-age.mjs"
+          if git cat-file -e HEAD^1:scripts/check-lockfile-age.mjs 2>/dev/null; then
+            git show HEAD^1:scripts/check-lockfile-age.mjs > "$gate"
+          else
+            echo "::warning::base has no lockfile age gate; using the PR's copy (bootstrap)"
+            cp scripts/check-lockfile-age.mjs "$gate"
+          fi
+          node "$gate" --base HEAD^1
+      # Tests for the PR's copy of the gate (what takes effect once merged).
+      - name: gate unit tests
+        run: node --test "scripts/*.test.mjs"
+
   iac-and-images:
     name: trivy (config + fs)
     runs-on: ubuntu-latest
