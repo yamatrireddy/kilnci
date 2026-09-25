@@ -75,7 +75,7 @@ export function renderApp(path: string, client: FakeClient = fakeClient(), platf
   const router = createMemoryRouter(kilnRoutes, { initialEntries: [path] });
   const signIn = vi.fn();
   const utils = render(
-    <KilnProvider platform={{ name: "Kiln", client: client as unknown as KilnClient, signIn, ...platform }} queryClient={createQueryClient({ retry: false })} env="test">
+    <KilnProvider platform={{ name: "Kiln", client: client as unknown as KilnClient, signIn, ...platform }} queryClient={createQueryClient({ retry: false })}>
       <RouterProvider router={router} />
     </KilnProvider>,
   );

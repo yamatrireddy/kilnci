@@ -22,7 +22,7 @@ feature has to invent its own auth, error model, config, or UI conventions.
 | 2. OpenAPI + codegen | Draft `openapi.yaml` (health, auth, session, orgs, members, projects, audit, tokens), oapi-codegen types, `@kiln/api-client`, request validation middleware, route/spec conformance test | done |
 | 3. Persistence | PostgreSQL, goose migrations (embedded, locked), sqlc repositories scoped by `org_id`, `store.InTx`, append-only hash-chained audit table, testcontainers integration tests | done |
 | 4. Auth | OIDC (Auth Code + PKCE) for web and desktop (ADR-0003), server-side sessions, CSRF, desktop token rotation, API tokens, RBAC + `authz.Check`, authz matrix test, audit events, rate limits | done |
-| 5. Web app | React + Mantine (ADR-0002) + TanStack Query; sign-in, orgs, projects, members, audit log, API tokens; loading/empty/error states; axe checks; strict CSP verified in a browser | done |
+| 5. Web app | React + Tailwind CSS (ADR-0004, superseding Mantine/ADR-0002) + TanStack Query; sign-in, orgs, projects, members, audit log, API tokens; loading/empty/error states; axe checks; strict CSP verified in a browser | done |
 | 6. Desktop shell | Tauri 2 wrapping the shared UI; 5 allow-listed commands; Rust-held tokens (keychain); loopback PKCE sign-in; CSP | done |
 
 **Exit criteria:** a user signs in via OIDC on web or desktop, sees only their orgs

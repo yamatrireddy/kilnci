@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Alert, Button, Center, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Button, TextField } from "@kiln/ui";
 import { IconFlame } from "@tabler/icons-react";
 import { useState, type SyntheticEvent } from "react";
 
@@ -20,40 +20,39 @@ export function ServerSetup({ onSave }: { onSave: (url: string) => Promise<void>
   };
 
   return (
-    <Center component="main" mih="100vh" p="md">
-      <Paper withBorder shadow="sm" p="xl" radius="lg" maw={460} w="100%">
+    <main className="grid min-h-screen place-items-center bg-subtle p-4">
+      <div className="w-full max-w-[460px] rounded-xl border border-line bg-surface p-6 shadow-sm sm:p-8">
         <form onSubmit={submit} noValidate>
-          <Stack>
-            <Stack gap={4} align="center">
-              <IconFlame size={40} aria-hidden color="var(--mantine-color-kiln-6)" />
-              <Title order={1} size="h2">
-                Connect to Kiln
-              </Title>
-              <Text c="dimmed" size="sm" ta="center">
-                Enter the address of your organization&apos;s Kiln server.
-              </Text>
-            </Stack>
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col items-center gap-1 text-center">
+              <IconFlame size={40} aria-hidden className="text-kiln-600 dark:text-kiln-400" />
+              <h1 className="mt-1 text-2xl">Connect to Kiln</h1>
+              <p className="text-sm text-dimmed">Enter the address of your organization&apos;s Kiln server.</p>
+            </div>
             {error ? (
-              <Alert color="red" variant="light" role="alert">
+              <Alert tone="red" role="alert">
                 {error}
               </Alert>
             ) : null}
-            <TextInput
+            <TextField
               label="Server URL"
               description="Must use https (http is allowed only for localhost)."
+              type="url"
+              inputMode="url"
+              autoComplete="url"
+              spellCheck={false}
               value={url}
               onChange={(e) => {
                 setUrl(e.currentTarget.value);
               }}
               required
-              data-autofocus
             />
-            <Button type="submit" loading={busy}>
+            <Button type="submit" size="lg" fullWidth loading={busy}>
               Continue
             </Button>
-          </Stack>
+          </div>
         </form>
-      </Paper>
-    </Center>
+      </div>
+    </main>
   );
 }
