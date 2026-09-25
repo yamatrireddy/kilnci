@@ -87,6 +87,8 @@ export function useUpdateMember(orgSlug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: Role }) => client.updateMember(orgSlug, userId, role),
+    // The org key is a prefix of the members key, so this refetches the member
+    // list and the org (whose `role` changes if callers change their own role).
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.org(orgSlug) }),
   });
 }

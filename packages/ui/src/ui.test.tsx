@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Role } from "@kiln/api-client";
 import { describe, expect, it, vi } from "vitest";
 
 import { slugify } from "./components/SlugNameForm";
@@ -120,6 +121,37 @@ describe("members", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => {
       expect(client.removeMember).toHaveBeenCalledWith("acme", "01ARZ3NDEKTSV4RRFFQ69G5FA3");
+    });
+  });
+
+  it("refetches members after a role change so the select shows the new role", async () => {
+    let bobRole: Role = "developer";
+    const base = fakeClient();
+    const client = fakeClient({
+      listMembers: vi.fn(async () => {
+        const res = await base.listMembers();
+        return { items: res.items.map((m) => (m.email === "bob@example.com" ? { ...m, role: bobRole } : m)) };
+      }),
+      updateMember: vi.fn((_org: string, _userId: string, role: Role) => {
+        bobRole = role;
+        return Promise.resolve({});
+      }),
+    });
+    renderApp("/orgs/acme?tab=members", client);
+    const select = await screen.findByRole("combobox", { name: "Role for Bob" });
+    expect(select).toHaveValue("developer");
+    const listCalls = client.listMembers.mock.calls.length;
+
+    await userEvent.selectOptions(select, "admin");
+
+    await waitFor(() => {
+      expect(client.updateMember).toHaveBeenCalledWith("acme", "01ARZ3NDEKTSV4RRFFQ69G5FA3", "admin");
+    });
+    await waitFor(() => {
+      expect(client.listMembers.mock.calls.length).toBeGreaterThan(listCalls);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Role for Bob" })).toHaveValue("admin");
     });
   });
 
