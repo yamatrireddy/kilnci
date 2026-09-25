@@ -25,4 +25,10 @@
 /docs/threat-model.md               @yamatrireddy @yamatrireddy/security-owners
 /SECURITY.md                        @yamatrireddy @yamatrireddy/security-owners
 /pnpm-lock.yaml                     @yamatrireddy @yamatrireddy/security-owners
+/pnpm-workspace.yaml                @yamatrireddy @yamatrireddy/security-owners
+/.npmrc                             @yamatrireddy @yamatrireddy/security-owners
+/package.json                       @yamatrireddy @yamatrireddy/security-owners
+/.pnpmfile.cjs                      @yamatrireddy @yamatrireddy/security-owners
+/patches/                           @yamatrireddy @yamatrireddy/security-owners
+/scripts/check-lockfile-age*.mjs    @yamatrireddy @yamatrireddy/security-owners
 /server/go.sum                      @yamatrireddy @yamatrireddy/security-owners
