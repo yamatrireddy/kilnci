@@ -87,6 +87,7 @@ test: test-go test-ts ## Run all unit tests
 test-go:
 	cd server && go test $(RACE) -count=1 ./...
 	cd runner && go test $(RACE) -count=1 ./...
+	cd cli && go test $(RACE) -count=1 ./...
 
 .PHONY: test-ts
 test-ts:
@@ -109,6 +110,8 @@ coverage: ## Coverage report with floors enforced
 	cd server && grep -v -E '/(store/db|api/gen|auth/authtest|store/storetest)/|/cmd/' coverage.raw > coverage.out
 	cd server && go tool cover -func=coverage.out | tail -1
 	cd server && bash ../scripts/coverage-check.sh coverage.out $(COVER_FLOOR) $(COVER_CRITICAL_FLOOR) $(COVER_CRITICAL_PKGS)
+	cd cli && go test -count=1 -coverprofile=coverage.out ./...
+	cd cli && bash ../scripts/coverage-check.sh coverage.out $(COVER_FLOOR) $(COVER_CRITICAL_FLOOR)
 	pnpm -r --if-present coverage
 
 ## -------------------------------------------------------------------- lint
@@ -120,6 +123,7 @@ lint: lint-go lint-ts lint-workflows ## golangci-lint, eslint + tsc, actionlint 
 lint-go:
 	cd server && $(call tool,golangci-lint) run --config ../.golangci.yml ./...
 	cd runner && $(call tool,golangci-lint) run --config ../.golangci.yml ./...
+	cd cli && $(call tool,golangci-lint) run --config ../.golangci.yml ./...
 
 .PHONY: lint-ts
 lint-ts:
@@ -157,11 +161,13 @@ sec-gitleaks:
 sec-gosec:
 	cd server && $(call tool,gosec) -quiet -severity medium -confidence medium -exclude-generated ./...
 	cd runner && $(call tool,gosec) -quiet -severity medium -confidence medium -exclude-generated ./...
+	cd cli && $(call tool,gosec) -quiet -severity medium -confidence medium -exclude-generated ./...
 
 .PHONY: sec-govulncheck
 sec-govulncheck:
 	cd server && $(call tool,govulncheck) ./...
 	cd runner && $(call tool,govulncheck) ./...
+	cd cli && $(call tool,govulncheck) ./...
 
 # Two passes. The workspace modules, npm, and Cargo get Go call analysis,
 # which reports only Go vulnerabilities the code can reach. tools/ is
@@ -194,4 +200,5 @@ sec-trivy: ## Needs Docker
 license-check: ## Dependency licenses against the allowlist
 	cd server && $(call tool,go-licenses) check ./... --ignore github.com/yamatrireddy/kilnci --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
 	cd runner && $(call tool,go-licenses) check ./... --ignore github.com/yamatrireddy/kilnci --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
+	cd cli && $(call tool,go-licenses) check ./... --ignore github.com/yamatrireddy/kilnci --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
 	node scripts/license-check.mjs

@@ -2,6 +2,7 @@ go 1.27.0
 
 // tools/ is intentionally not listed; see Makefile.
 use (
+	./cli
 	./proto
 	./runner
 	./server
