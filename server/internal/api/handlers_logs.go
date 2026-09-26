@@ -198,6 +198,9 @@ func parseLastEventID(v string) (logs.Position, error) {
 	if !found {
 		a, sq = "0", v
 	}
+	if !allDigits(a) || !allDigits(sq) {
+		return logs.Position{}, bad
+	}
 	attempt, err := strconv.Atoi(a)
 	if err != nil || attempt < 0 || attempt > maxEventNumber {
 		return logs.Position{}, bad
@@ -207,6 +210,18 @@ func parseLastEventID(v string) (logs.Position, error) {
 		return logs.Position{}, bad
 	}
 	return logs.Position{Attempt: attempt, Seq: seq + 1}, nil
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // maxEventNumber bounds the attempt in an event ID.

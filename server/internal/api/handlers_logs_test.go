@@ -121,6 +121,9 @@ func TestParseLastEventID(t *testing.T) {
 		{"x", logs.Position{}, false},
 		{"1.2.3", logs.Position{}, false},
 		{"99999999.0", logs.Position{}, false},
+		{"+5", logs.Position{}, false},
+		{"1.+0", logs.Position{}, false},
+		{".5", logs.Position{}, false},
 	} {
 		got, err := parseLastEventID(tc.in)
 		if (err == nil) != tc.ok || got != tc.want {

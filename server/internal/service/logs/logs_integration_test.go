@@ -7,6 +7,7 @@ package logs_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -390,6 +391,51 @@ func TestAppend_ReplayOfTheTruncatingChunk(t *testing.T) {
 	}
 	if _, err := e.logs.Append(ctx, rn, l.Job.ID, l.ID, 1, bytes.Repeat([]byte("z"), 200<<10)); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("different content = %v", err)
+	}
+}
+
+// TestAppend_ConcurrentSameSeq: two appends racing for one chunk number
+// with different content store one and reject the other as a conflict, and
+// the stored object matches the recorded chunk (security review).
+func TestAppend_ConcurrentSameSeq(t *testing.T) {
+	e := newEnv(t, 0)
+	ctx := t.Context()
+	rn, l := e.leased()
+	for round := range 20 {
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i := range 2 {
+			wg.Go(func() {
+				_, errs[i] = e.logs.Append(ctx, rn, l.Job.ID, l.ID, round, []byte(fmt.Sprintf("r%d-%d\n", round, i)))
+			})
+		}
+		wg.Wait()
+		ok, conflicts := 0, 0
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				ok++
+			case errors.Is(err, domain.ErrConflict):
+				conflicts++
+			default:
+				t.Fatalf("round %d: unexpected error %v", round, err)
+			}
+		}
+		if ok != 1 || conflicts != 1 {
+			t.Fatalf("round %d: %d stored, %d conflicts", round, ok, conflicts)
+		}
+	}
+	got, err := e.read(e.viewer, e.ref(l))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for round := range 20 {
+		if !strings.Contains(got, fmt.Sprintf("r%d-", round)) {
+			t.Fatalf("round %d missing from %q", round, got)
+		}
+	}
+	if strings.Count(got, "\n") != 20 {
+		t.Fatalf("log = %q", got)
 	}
 }
 

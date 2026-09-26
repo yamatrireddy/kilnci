@@ -26,9 +26,17 @@ func (s *Store) LockJobLogState(ctx context.Context, ref LeaseRef, now time.Time
 	r, err := s.q(ctx).LockJobLogState(ctx, db.LockJobLogStateParams{
 		OrgID: ref.OrgID, ID: ref.JobID, RunnerID: &ref.RunnerID, LeaseID: ref.LeaseID, Now: &now,
 	})
+	if err != nil {
+		return JobLogState{}, mapErr("lock job log state", err)
+	}
+	// Counted in a separate statement, after the lock is held (see the query).
+	n, err := s.q(ctx).CountJobLogChunks(ctx, db.CountJobLogChunksParams{OrgID: ref.OrgID, JobID: ref.JobID, Attempt: r.Attempt})
+	if err != nil {
+		return JobLogState{}, mapErr("count job log chunks", err)
+	}
 	return JobLogState{
-		RunID: r.RunID, Attempt: int(r.Attempt), Bytes: r.LogBytes, Truncated: r.LogTruncated, Chunks: int(r.Chunks),
-	}, mapErr("lock job log state", err)
+		RunID: r.RunID, Attempt: int(r.Attempt), Bytes: r.LogBytes, Truncated: r.LogTruncated, Chunks: int(n),
+	}, nil
 }
 
 // LogChunk is the metadata of one stored chunk (content is in object storage).

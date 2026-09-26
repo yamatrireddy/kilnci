@@ -35,6 +35,28 @@ func (q *Queries) AddJobLogBytes(ctx context.Context, arg AddJobLogBytesParams) 
 	return err
 }
 
+const countJobLogChunks = `-- name: CountJobLogChunks :one
+SELECT count(*)::integer
+FROM job_log_chunks
+WHERE org_id = $1 AND job_id = $2 AND attempt = $3
+`
+
+type CountJobLogChunksParams struct {
+	OrgID   string
+	JobID   string
+	Attempt int32
+}
+
+// CountJobLogChunks runs after LockJobLogState as its own statement, so it
+// sees chunks committed by an append that held the lock before (a subquery
+// in the locking statement would read the snapshot taken before the wait).
+func (q *Queries) CountJobLogChunks(ctx context.Context, arg CountJobLogChunksParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countJobLogChunks, arg.OrgID, arg.JobID, arg.Attempt)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getJobLogChunk = `-- name: GetJobLogChunk :one
 SELECT seq, size, sha256, sha256_request, object_key
 FROM job_log_chunks
@@ -209,9 +231,7 @@ func (q *Queries) ListJobLogChunks(ctx context.Context, arg ListJobLogChunksPara
 
 const lockJobLogState = `-- name: LockJobLogState :one
 
-SELECT j.run_id, j.attempt, j.log_bytes, j.log_truncated,
-    (SELECT count(*) FROM job_log_chunks c
-     WHERE c.org_id = j.org_id AND c.job_id = j.id AND c.attempt = j.attempt)::integer AS chunks
+SELECT j.run_id, j.attempt, j.log_bytes, j.log_truncated
 FROM jobs j
 WHERE j.org_id = $1 AND j.id = $2 AND j.status = 'running'
   AND j.runner_id = $3 AND j.lease_id = $4
@@ -232,14 +252,13 @@ type LockJobLogStateRow struct {
 	Attempt      int32
 	LogBytes     int64
 	LogTruncated bool
-	Chunks       int32
 }
 
 // SPDX-License-Identifier: Apache-2.0
 // LockJobLogState serializes appends for one job and re-checks the lease
 // under the row lock, so a runner whose lease lapsed (and was re-leased)
-// cannot append between a check and the insert. Log bytes and the chunk
-// count are those of the current attempt.
+// cannot append between a check and the insert. Log bytes are those of the
+// current attempt.
 func (q *Queries) LockJobLogState(ctx context.Context, arg LockJobLogStateParams) (LockJobLogStateRow, error) {
 	row := q.db.QueryRow(ctx, lockJobLogState,
 		arg.OrgID,
@@ -254,7 +273,6 @@ func (q *Queries) LockJobLogState(ctx context.Context, arg LockJobLogStateParams
 		&i.Attempt,
 		&i.LogBytes,
 		&i.LogTruncated,
-		&i.Chunks,
 	)
 	return i, err
 }

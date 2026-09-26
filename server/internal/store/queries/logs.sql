@@ -2,17 +2,23 @@
 
 -- LockJobLogState serializes appends for one job and re-checks the lease
 -- under the row lock, so a runner whose lease lapsed (and was re-leased)
--- cannot append between a check and the insert. Log bytes and the chunk
--- count are those of the current attempt.
+-- cannot append between a check and the insert. Log bytes are those of the
+-- current attempt.
 -- name: LockJobLogState :one
-SELECT j.run_id, j.attempt, j.log_bytes, j.log_truncated,
-    (SELECT count(*) FROM job_log_chunks c
-     WHERE c.org_id = j.org_id AND c.job_id = j.id AND c.attempt = j.attempt)::integer AS chunks
+SELECT j.run_id, j.attempt, j.log_bytes, j.log_truncated
 FROM jobs j
 WHERE j.org_id = sqlc.arg(org_id) AND j.id = sqlc.arg(id) AND j.status = 'running'
   AND j.runner_id = sqlc.arg(runner_id) AND j.lease_id = sqlc.arg(lease_id)
   AND j.lease_expires_at > sqlc.arg(now)
 FOR UPDATE OF j;
+
+-- CountJobLogChunks runs after LockJobLogState as its own statement, so it
+-- sees chunks committed by an append that held the lock before (a subquery
+-- in the locking statement would read the snapshot taken before the wait).
+-- name: CountJobLogChunks :one
+SELECT count(*)::integer
+FROM job_log_chunks
+WHERE org_id = $1 AND job_id = $2 AND attempt = $3;
 
 -- name: GetJobLogChunk :one
 SELECT seq, size, sha256, sha256_request, object_key
