@@ -22,13 +22,20 @@ default, and blocked for fork PRs. Phase 1 ships one executor: Docker.
    only as `KILN_*` environment variables (T-24).
 
 2. **Hardened defaults (T-19, T-26)**, not configurable per pipeline:
-   - `User: 1000:1000` (non-root), `HOME=/tmp/home`;
+   - `User: 65532:65532` (non-root, and unlikely to be a person's UID on
+     the host; changed from 1000 after the Phase 1 security review),
+     `HOME=/tmp/home`;
    - `CapDrop: ALL`, `SecurityOpt: no-new-privileges`, the runtime's default
      seccomp and AppArmor profiles, `Privileged: false`;
    - no host network, PID, IPC, or UTS namespace; no bind mounts from the
      host; the Docker socket is never mounted;
    - `Init: true`; limits on memory (default 4 GiB, no swap), CPU (default
-     2), PIDs (default 1024); a tmpfs `/tmp`;
+     2), PIDs (default 1024), and disk (default 10 GiB for each
+     container's writable layer via `StorageOpt size` and for the
+     workspace volume via the local driver's `size` option; it needs
+     `overlay2` on XFS with `pquota`, which the runner checks at startup and
+     before each job, failing closed unless the operator passes
+     `--job-disk-limit=off`); a tmpfs `/tmp`;
    - a dedicated bridge network per job, removed afterwards.
    Runner operators may lower limits; raising privileges needs a code change.
 
@@ -48,16 +55,25 @@ default, and blocked for fork PRs. Phase 1 ships one executor: Docker.
    (security review). The volume, containers, and network are removed when
    the job ends, whatever the outcome (T-23).
 
-4. **Images.** Untrusted jobs pull anonymously, so a fork PR cannot use the
-   runner host's registry credentials to pull an org's private images;
-   trusted jobs may use the runner's configured registry credentials. Digest
-   pinning and plugin capabilities are Phase 4 (T-25).
+4. **Images.** Every job pulls anonymously, so a fork PR cannot use the
+   runner host's registry credentials to pull an org's private images.
+   Registry credentials for trusted jobs may come later; digest pinning
+   and plugin capabilities are Phase 4 (T-25). Because `dockerd` pulls from
+   the host's network namespace (outside the job's egress rules), the runner
+   refuses images from registries on loopback, private, link-local, CGNAT,
+   or metadata addresses, literal or resolved, unless the operator
+   allow-lists the exact registry (T-60).
 
 5. **Masking (T-27).** The runner masks every sensitive value it knows (the
    clone credential now; secrets in Phase 2) in the combined stdout/stderr
-   stream before any byte leaves the runner, including base64, URL-encoded,
-   and hex forms, per-line pieces of multi-line values, and matches split
-   across chunk boundaries. Masking is a safety net, not a boundary.
+   stream before any byte leaves the runner, including base64 in each
+   alignment (also when wrapped into lines of 16 or more characters, as
+   `base64` and PEM output are), URL-encoded, lower- and upper-case hex, and
+   JSON-escaped forms, per-line pieces of multi-line values, and matches
+   split across chunk boundaries; output is the same however it is split
+   into writes. Known gaps: values shorter than 4 bytes, base64 wrapped
+   narrower than 16 columns, up to 3 characters at a wrapped line's edge,
+   and any encoding not listed. Masking is a safety net, not a boundary.
 
 6. **Shell and Kubernetes executors.** The shell executor is not built
    (so it cannot be enabled by accident). Kubernetes (PSS `restricted`) is
@@ -89,8 +105,10 @@ default, and blocked for fork PRs. Phase 1 ships one executor: Docker.
   lease.
 - *Information disclosure (T-18, T-27):* Phase 1 delivers no secrets; the
   clone credential is confined to the clone container and masked.
-- *Denial of service (T-26):* CPU, memory, PID, and time limits; the job
-  timeout is enforced both by the runner and by the server's lease reaper.
+- *Denial of service (T-26):* CPU, memory, PID, disk, and time limits; the
+  job timeout is enforced both by the runner and by the server's lease
+  reaper. Output the runner cannot upload is replaced by a marker in the
+  log rather than dropped silently.
 - *Elevation of privilege (T-19):* non-root, no capabilities,
   no-new-privileges, default seccomp/AppArmor, no Docker socket, no
   privileged mode. Kernel 0-days remain an accepted residual risk (threat
