@@ -47,16 +47,21 @@ not give a stolen runner credential more than one runner's worth of access.
    The runner's private key never leaves the host.
 
 4. **Renewal and revocation.** Runners call `RenewCertificate` (mTLS) with a
-   new CSR after half the certificate lifetime. Every authenticated RPC loads
-   the runner row: a runner that is deleted (revoked) is rejected, so
-   revocation takes effect on the next call rather than at certificate
-   expiry. Only the **current** serial may renew. The immediately previous
-   serial is accepted for other calls for a short grace period (5 minutes)
-   after a renewal, so in-flight calls finish. A renewal attempt with any
-   non-current serial, or a second renewal within half a certificate
-   lifetime, is treated like refresh-token reuse: the runner is revoked and
-   the event is audited. Without that rule, an attacker holding a stolen key
-   could keep renewing alongside the real runner forever (security review).
+   new CSR once a certificate is a quarter to half through its lifetime
+   (earlier renewals are rate-limited). Every authenticated RPC loads the
+   runner row, so revocation takes effect on the next call, and lease grants
+   re-check the runner row, so it also cuts off a long-poll already in
+   progress. Serial rules (security review):
+   - The **current** serial may do anything, including renew.
+   - The immediately **previous** serial is accepted for 5 minutes after a
+     renewal so in-flight calls finish. A renewal from it with the *same
+     key* as the new certificate is a retry after a lost response and gets
+     the current certificate again (the key's SPKI hash is stored).
+   - Any other verified, unexpired certificate for a live runner (previous
+     serial after the grace period, or a renewal with a different key)
+     means two parties hold the runner's credentials: the runner is revoked
+     and the reuse is audited. The runner persists its new key before
+     asking for renewal so a crash cannot turn a retry into reuse.
 
 5. **Method policy (deny by default, invariant 9).** A gRPC interceptor maps
    every method to one rule: `Register` requires a registration token and no
@@ -78,8 +83,13 @@ not give a stolen runner credential more than one runner's worth of access.
    current lease ID from the leasing runner, before expiry. Expired leases
    are reaped: the job is re-queued up to its retry budget, otherwise failed.
    Jobs also have a hard timeout; heartbeats report cancellation and timeout
-   so the runner stops the job. `Lease` is scoped with `FOR UPDATE SKIP
-   LOCKED`, so two runners can never hold the same job.
+   so the runner stops the job. Grants lock the run, then the runner, then
+   compare-and-swap the job, so two runners can never hold the same job and
+   a runner never exceeds its capacity (default 1 concurrent job). A lease
+   that was granted but could not be delivered is released without spending
+   an attempt. Each runner may have at most two `Lease` long-polls in flight,
+   polls back off from 250 ms to 4 s, and the listener caps connections, so
+   one runner credential cannot multiply database load.
 
 8. **Versioning (T-17).** Every request carries `protocol_version`. The server
    accepts the current and previous minor protocol versions and rejects

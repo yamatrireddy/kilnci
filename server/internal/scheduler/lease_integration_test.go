@@ -118,7 +118,7 @@ func (e *env) runner(labels []string, trusted bool) scheduler.Runner {
 	now := e.clk.now()
 	if err := e.st.CreateRunner(e.t.Context(), domain.Runner{
 		ID: id, OrgID: e.org.ID, Name: "r", Labels: labels, Trusted: trusted, CertSerial: id,
-		CertRenewedAt: now, CertExpiresAt: now.Add(time.Hour), CreatedAt: now,
+		CertDER: []byte{1}, CertSPKIHash: []byte{1}, CertRenewedAt: now, CertExpiresAt: now.Add(time.Hour), CreatedAt: now,
 	}); err != nil {
 		e.t.Fatal(err)
 	}
@@ -412,3 +412,79 @@ func TestCancel_RunningJobIsCanceledThroughTheRunner(t *testing.T) {
 		t.Fatalf("run = %s", e.runStatus(r.ID))
 	}
 }
+
+func TestLease_RevokedRunnerIsNotGrantedAJob(t *testing.T) {
+	e := newEnv(t)
+	rn := e.runner(nil, false)
+	// The runner was authenticated before it was revoked (e.g. mid long-poll).
+	if err := e.st.RevokeRunner(t.Context(), e.org.ID, rn.ID, e.clk.now()); err != nil {
+		t.Fatal(err)
+	}
+	r := e.run(twoJobs, false)
+	if l, err := e.sched.Lease(t.Context(), rn); l != nil {
+		t.Fatalf("revoked runner leased %+v (%v)", l.Job, err)
+	}
+	if j := e.jobs(r.ID)["build"]; j.Status != domain.JobQueued {
+		t.Fatalf("job = %s", j.Status)
+	}
+}
+
+func TestLease_RunnerCapacityAndStaleLabels(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	rn := e.runner([]string{"linux"}, false) // capacity defaults to 1
+	e.run(oneJob, false)
+	e.run(oneJob, false)
+	if l, err := e.sched.Lease(ctx, rn); err != nil || l == nil {
+		t.Fatalf("first lease = %v %v", l, err)
+	}
+	if l, _ := e.sched.Lease(ctx, rn); l != nil {
+		t.Fatal("runner exceeded its capacity")
+	}
+	// Labels claimed by the caller are re-checked against the runner row.
+	liar := e.runner(nil, false)
+	liar.Labels = []string{"gpu"}
+	e.run(gpuJob, false)
+	if l, _ := e.sched.Lease(ctx, liar); l != nil && l.Job.Name == "g" {
+		t.Fatal("stale caller-side labels granted a gpu job")
+	}
+}
+
+func TestRelease_ReturnsJobWithoutSpendingAnAttempt(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	r := e.run(twoJobs, false)
+	rn := e.runner(nil, false)
+	l, err := e.sched.Lease(ctx, rn)
+	if err != nil || l == nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.Release(ctx, rn, l.Job.ID, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	j := e.jobs(r.ID)["build"]
+	if j.Status != domain.JobQueued || j.Attempt != 0 || j.RunnerID != "" {
+		t.Fatalf("released job = %+v", j)
+	}
+	if _, err := e.sched.Heartbeat(ctx, rn, l.Job.ID, l.ID); !errors.Is(err, scheduler.ErrLeaseLost) {
+		t.Fatalf("heartbeat after release = %v", err)
+	}
+	if err := e.sched.Release(ctx, rn, l.Job.ID, l.ID); err != nil {
+		t.Fatalf("second release = %v", err)
+	}
+}
+
+const oneJob = `version: 1
+jobs:
+  a:
+    image: alpine
+    steps: [{run: x}]
+`
+
+const gpuJob = `version: 1
+jobs:
+  g:
+    image: alpine
+    runs-on: [gpu]
+    steps: [{run: x}]
+`

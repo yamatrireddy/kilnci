@@ -174,7 +174,10 @@ type Runner struct {
 	Labels         []string
 	Trusted        bool
 	Version        string
+	Capacity       int32
 	CertSerial     string
+	CertDer        []byte
+	CertSpkiSha256 []byte
 	PrevCertSerial *string
 	CertRenewedAt  time.Time
 	CertExpiresAt  time.Time

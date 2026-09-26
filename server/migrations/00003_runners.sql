@@ -13,9 +13,15 @@ CREATE TABLE runners (
     labels           text[] NOT NULL,
     trusted          boolean NOT NULL,
     version          text NOT NULL DEFAULT '' CHECK (length(version) <= 64),
+    -- How many jobs the runner may hold at once.
+    capacity         integer NOT NULL DEFAULT 1 CHECK (capacity BETWEEN 1 AND 16),
     -- Current and previous client-certificate serials (hex). Only the
     -- current one may renew; the previous one works for a grace period.
     cert_serial      text NOT NULL,
+    -- The current certificate and its key hash let a lost renewal response
+    -- be retried idempotently (same key) without being mistaken for reuse.
+    cert_der         bytea NOT NULL,
+    cert_spki_sha256 bytea NOT NULL,
     prev_cert_serial text,
     cert_renewed_at  timestamptz NOT NULL,
     cert_expires_at  timestamptz NOT NULL,

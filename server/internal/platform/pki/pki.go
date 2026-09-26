@@ -16,6 +16,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -28,7 +29,9 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -116,6 +119,15 @@ func writeNew(root *os.Root, name string, data []byte, mode os.FileMode) error {
 
 // Load reads the CA from dir.
 func Load(dir string) (*CA, error) {
+	if runtime.GOOS != "windows" {
+		st, err := os.Stat(filepath.Join(dir, KeyFile))
+		if err != nil {
+			return nil, fmt.Errorf("load runner CA key: %w", err)
+		}
+		if st.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Errorf("load runner CA: %s must not be accessible to group or others (chmod 600)", KeyFile)
+		}
+	}
 	fsys := os.DirFS(dir)
 	certPEM, err := fs.ReadFile(fsys, CertFile)
 	if err != nil {
@@ -239,6 +251,8 @@ type Issued struct {
 	DER      []byte
 	Serial   string
 	NotAfter time.Time
+	// SPKIHash is the SHA-256 of the certified public key (see CSRKeyHash).
+	SPKIHash []byte
 }
 
 // SignRunnerCSR verifies csrDER's signature (proof of possession) and issues
@@ -253,24 +267,9 @@ func (ca *CA) SignRunnerCSR(csrDER []byte, runnerID, orgID string, now time.Time
 	if len(csrDER) == 0 || len(csrDER) > 8<<10 {
 		return Issued{}, ErrInvalidCSR
 	}
-	csr, err := x509.ParseCertificateRequest(csrDER)
+	pub, spki, err := parseCSR(csrDER)
 	if err != nil {
-		return Issued{}, ErrInvalidCSR
-	}
-	if err := csr.CheckSignature(); err != nil {
-		return Issued{}, ErrInvalidCSR
-	}
-	var pub crypto.PublicKey
-	switch k := csr.PublicKey.(type) {
-	case *ecdsa.PublicKey:
-		if k.Curve != elliptic.P256() {
-			return Issued{}, ErrInvalidCSR
-		}
-		pub = k
-	case ed25519.PublicKey:
-		pub = k
-	default:
-		return Issued{}, ErrInvalidCSR
+		return Issued{}, err
 	}
 	serial, err := newSerial()
 	if err != nil {
@@ -290,7 +289,40 @@ func (ca *CA) SignRunnerCSR(csrDER []byte, runnerID, orgID string, now time.Time
 	if err != nil {
 		return Issued{}, fmt.Errorf("sign runner certificate: %w", err)
 	}
-	return Issued{DER: der, Serial: SerialHex(serial), NotAfter: notAfter}, nil
+	return Issued{DER: der, Serial: SerialHex(serial), NotAfter: notAfter, SPKIHash: spki}, nil
+}
+
+// parseCSR verifies a CSR's signature (proof of possession) and key type and
+// returns its public key and the SHA-256 of its SubjectPublicKeyInfo.
+func parseCSR(csrDER []byte) (crypto.PublicKey, []byte, error) {
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		return nil, nil, ErrInvalidCSR
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, nil, ErrInvalidCSR
+	}
+	switch k := csr.PublicKey.(type) {
+	case *ecdsa.PublicKey:
+		if k.Curve != elliptic.P256() {
+			return nil, nil, ErrInvalidCSR
+		}
+	case ed25519.PublicKey:
+	default:
+		return nil, nil, ErrInvalidCSR
+	}
+	sum := sha256.Sum256(csr.RawSubjectPublicKeyInfo)
+	return csr.PublicKey, sum[:], nil
+}
+
+// CSRKeyHash verifies a CSR and returns the SHA-256 of its public key, so a
+// retried renewal can be recognised as the same key.
+func CSRKeyHash(csrDER []byte) ([]byte, error) {
+	if len(csrDER) == 0 || len(csrDER) > 8<<10 {
+		return nil, ErrInvalidCSR
+	}
+	_, h, err := parseCSR(csrDER)
+	return h, err
 }
 
 // RunnerIdentity extracts and checks the identity of a client certificate

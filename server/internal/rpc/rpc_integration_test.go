@@ -353,3 +353,82 @@ func TestRunnerProtocol_RejectsForeignCertificates(t *testing.T) {
 		t.Fatalf("unknown runner = %v", err)
 	}
 }
+
+func TestRunnerProtocol_ReuseOutsideGraceRevokes(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	_, cert := e.register(nil)
+	old := e.dial(cert)
+	e.clk.set(time.Now().UTC())
+	key2, csr2 := newKey(t)
+	renewed, err := old.RenewCertificate(ctx, &runnerv1.RenewCertificateRequest{ProtocolVersion: v1, CsrDer: csr2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := e.dial(certOf(renewed.GetCertificateDer(), key2))
+	// Past the grace period, the old certificate means someone kept a copy.
+	e.clk.set(time.Now().UTC().Add(10 * time.Minute))
+	if _, err := old.Lease(ctx, &runnerv1.LeaseRequest{ProtocolVersion: v1}); code(err) != codes.Unauthenticated {
+		t.Fatalf("stale cert = %v", err)
+	}
+	if _, err := fresh.Lease(ctx, &runnerv1.LeaseRequest{ProtocolVersion: v1}); code(err) != codes.Unauthenticated {
+		t.Fatalf("runner not revoked after stale-cert use: %v", err)
+	}
+	if err := e.recorder.VerifyChain(ctx, e.org.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunnerProtocol_RenewalRetryIsIdempotent(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	_, cert := e.register(nil)
+	old := e.dial(cert)
+	e.clk.set(time.Now().UTC())
+	key2, csr2 := newKey(t)
+	first, err := old.RenewCertificate(ctx, &runnerv1.RenewCertificateRequest{ProtocolVersion: v1, CsrDer: csr2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The response was "lost": the runner retries with its old cert and the
+	// same pending key, and gets the same certificate back.
+	again, err := old.RenewCertificate(ctx, &runnerv1.RenewCertificateRequest{ProtocolVersion: v1, CsrDer: csr2})
+	if err != nil || string(again.GetCertificateDer()) != string(first.GetCertificateDer()) {
+		t.Fatalf("retry = %v", err)
+	}
+	if _, err := e.dial(certOf(again.GetCertificateDer(), key2)).Lease(ctx, &runnerv1.LeaseRequest{ProtocolVersion: v1}); err != nil {
+		t.Fatalf("runner revoked by an idempotent retry: %v", err)
+	}
+	// A retry with a different key is reuse.
+	_, csr3 := newKey(t)
+	if _, err := old.RenewCertificate(ctx, &runnerv1.RenewCertificateRequest{ProtocolVersion: v1, CsrDer: csr3}); code(err) != codes.Unauthenticated {
+		t.Fatalf("different-key retry = %v", err)
+	}
+}
+
+func TestRunnerProtocol_ConcurrentPollsAreCapped(t *testing.T) {
+	e := newEnv(t)
+	_, cert := e.register(nil)
+	client := e.dial(cert)
+	var wg sync.WaitGroup
+	codesSeen := make(chan codes.Code, 4)
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := client.Lease(t.Context(), &runnerv1.LeaseRequest{ProtocolVersion: v1})
+			codesSeen <- code(err)
+		}()
+	}
+	wg.Wait()
+	close(codesSeen)
+	limited := 0
+	for c := range codesSeen {
+		if c == codes.ResourceExhausted {
+			limited++
+		}
+	}
+	if limited == 0 {
+		t.Fatal("4 concurrent polls from one runner were all accepted")
+	}
+}

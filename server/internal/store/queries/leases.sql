@@ -16,6 +16,10 @@ WHERE org_id = sqlc.arg(org_id)
 ORDER BY queued_at, id
 LIMIT sqlc.arg(max_rows);
 
+-- AcquireLease re-checks the runner against its current row at grant time:
+-- it must not be revoked, must still have the job's labels and trust, and
+-- must be below its capacity (a long-polling Lease call must not outlive a
+-- revocation).
 -- name: AcquireLease :execrows
 UPDATE jobs
 SET status = 'running',
@@ -25,9 +29,24 @@ SET status = 'running',
     attempt = attempt + 1,
     started_at = sqlc.arg(now),
     cancel_requested = false
-WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'queued'
-  AND labels <@ sqlc.arg(runner_labels)::text[]
-  AND (trusted OR NOT sqlc.arg(runner_trusted)::boolean);
+WHERE jobs.org_id = sqlc.arg(org_id) AND jobs.id = sqlc.arg(id) AND jobs.status = 'queued'
+  AND EXISTS (
+      SELECT 1 FROM runners r
+      WHERE r.org_id = jobs.org_id AND r.id = sqlc.arg(runner_id) AND r.revoked_at IS NULL
+        AND jobs.labels <@ r.labels
+        AND (jobs.trusted OR NOT r.trusted)
+        AND (SELECT count(*) FROM jobs held
+             WHERE held.org_id = r.org_id AND held.runner_id = r.id AND held.status = 'running') < r.capacity
+  );
+
+-- ReleaseLease puts a job that was leased but never delivered back in the
+-- queue without spending an attempt.
+-- name: ReleaseLease :execrows
+UPDATE jobs
+SET status = 'queued', lease_id = NULL, lease_expires_at = NULL, runner_id = NULL,
+    attempt = attempt - 1, started_at = NULL, queued_at = sqlc.arg(now)
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'running'
+  AND runner_id = sqlc.arg(runner_id) AND lease_id = sqlc.arg(lease_id) AND attempt > 0;
 
 -- name: GetLeasedJob :one
 SELECT id, org_id, run_id, name, status, needs, image, labels, steps, env, timeout_seconds, attempt,
@@ -87,3 +106,10 @@ SET status = sqlc.arg(to_status), lease_id = NULL, lease_expires_at = NULL,
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'running'
   AND (lease_expires_at <= sqlc.arg(now)
        OR started_at + make_interval(secs => timeout_seconds + sqlc.arg(grace_seconds)::integer) <= sqlc.arg(now));
+
+-- LockRunnerForLease serializes lease grants per runner so the capacity
+-- check in AcquireLease cannot be raced. Lock order: run, runner, job.
+-- name: LockRunnerForLease :one
+SELECT id FROM runners
+WHERE org_id = $1 AND id = $2
+FOR NO KEY UPDATE;

@@ -14,7 +14,8 @@ import (
 func toRunner(r db.Runner) domain.Runner {
 	return domain.Runner{
 		ID: r.ID, OrgID: r.OrgID, Name: r.Name, Labels: r.Labels, Trusted: r.Trusted, Version: r.Version,
-		CertSerial: r.CertSerial, PrevCertSerial: deref(r.PrevCertSerial), CertRenewedAt: r.CertRenewedAt,
+		Capacity: int(r.Capacity), CertSerial: r.CertSerial, CertDER: r.CertDer, CertSPKIHash: r.CertSpkiSha256,
+		PrevCertSerial: deref(r.PrevCertSerial), CertRenewedAt: r.CertRenewedAt,
 		CertExpiresAt: r.CertExpiresAt, CreatedBy: deref(r.CreatedBy), CreatedAt: r.CreatedAt,
 		LastSeenAt: r.LastSeenAt, RevokedAt: r.RevokedAt,
 	}
@@ -64,8 +65,8 @@ func (s *Store) DeleteExpiredRunnerRegistrationTokens(ctx context.Context, now t
 func (s *Store) CreateRunner(ctx context.Context, r domain.Runner) error {
 	return mapErr("create runner", s.q(ctx).CreateRunner(ctx, db.CreateRunnerParams{
 		ID: r.ID, OrgID: r.OrgID, Name: r.Name, Labels: nonNil(r.Labels), Trusted: r.Trusted, Version: r.Version,
-		CertSerial: r.CertSerial, CertRenewedAt: r.CertRenewedAt, CertExpiresAt: r.CertExpiresAt,
-		CreatedBy: nilIfEmpty(r.CreatedBy), CreatedAt: r.CreatedAt, LastSeenAt: r.LastSeenAt,
+		CertSerial: r.CertSerial, CertDer: r.CertDER, CertSpkiSha256: r.CertSPKIHash, CertRenewedAt: r.CertRenewedAt,
+		CertExpiresAt: r.CertExpiresAt, CreatedBy: nilIfEmpty(r.CreatedBy), CreatedAt: r.CreatedAt, LastSeenAt: r.LastSeenAt,
 	}))
 }
 
@@ -98,6 +99,7 @@ func (s *Store) ListRunners(ctx context.Context, orgID, afterID string, limit in
 type CertRotation struct {
 	OrgID, RunnerID          string
 	CurrentSerial, NewSerial string
+	CertDER, SPKIHash        []byte
 	Now, ExpiresAt           time.Time
 }
 
@@ -105,7 +107,8 @@ type CertRotation struct {
 // c.CurrentSerial; domain.ErrConflict otherwise.
 func (s *Store) RotateRunnerCertificate(ctx context.Context, c CertRotation) error {
 	n, err := s.q(ctx).RotateRunnerCertificate(ctx, db.RotateRunnerCertificateParams{
-		NewSerial: c.NewSerial, Now: c.Now, ExpiresAt: c.ExpiresAt, OrgID: c.OrgID, ID: c.RunnerID, CurrentSerial: c.CurrentSerial,
+		NewSerial: c.NewSerial, CertDer: c.CertDER, CertSpkiSha256: c.SPKIHash, Now: c.Now, ExpiresAt: c.ExpiresAt,
+		OrgID: c.OrgID, ID: c.RunnerID, CurrentSerial: c.CurrentSerial,
 	})
 	if err == nil && n == 0 {
 		return fmt.Errorf("rotate runner certificate: %w", domain.ErrConflict)

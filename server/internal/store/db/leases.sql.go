@@ -21,9 +21,15 @@ SET status = 'running',
     attempt = attempt + 1,
     started_at = $4,
     cancel_requested = false
-WHERE org_id = $5 AND id = $6 AND status = 'queued'
-  AND labels <@ $7::text[]
-  AND (trusted OR NOT $8::boolean)
+WHERE jobs.org_id = $5 AND jobs.id = $6 AND jobs.status = 'queued'
+  AND EXISTS (
+      SELECT 1 FROM runners r
+      WHERE r.org_id = jobs.org_id AND r.id = $1 AND r.revoked_at IS NULL
+        AND jobs.labels <@ r.labels
+        AND (jobs.trusted OR NOT r.trusted)
+        AND (SELECT count(*) FROM jobs held
+             WHERE held.org_id = r.org_id AND held.runner_id = r.id AND held.status = 'running') < r.capacity
+  )
 `
 
 type AcquireLeaseParams struct {
@@ -33,10 +39,12 @@ type AcquireLeaseParams struct {
 	Now            *time.Time
 	OrgID          string
 	ID             string
-	RunnerLabels   []string
-	RunnerTrusted  bool
 }
 
+// AcquireLease re-checks the runner against its current row at grant time:
+// it must not be revoked, must still have the job's labels and trust, and
+// must be below its capacity (a long-polling Lease call must not outlive a
+// revocation).
 func (q *Queries) AcquireLease(ctx context.Context, arg AcquireLeaseParams) (int64, error) {
 	result, err := q.db.Exec(ctx, acquireLease,
 		arg.RunnerID,
@@ -45,8 +53,6 @@ func (q *Queries) AcquireLease(ctx context.Context, arg AcquireLeaseParams) (int
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
-		arg.RunnerLabels,
-		arg.RunnerTrusted,
 	)
 	if err != nil {
 		return 0, err
@@ -309,6 +315,58 @@ func (q *Queries) ListLeaseCandidates(ctx context.Context, arg ListLeaseCandidat
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockRunnerForLease = `-- name: LockRunnerForLease :one
+SELECT id FROM runners
+WHERE org_id = $1 AND id = $2
+FOR NO KEY UPDATE
+`
+
+type LockRunnerForLeaseParams struct {
+	OrgID string
+	ID    string
+}
+
+// LockRunnerForLease serializes lease grants per runner so the capacity
+// check in AcquireLease cannot be raced. Lock order: run, runner, job.
+func (q *Queries) LockRunnerForLease(ctx context.Context, arg LockRunnerForLeaseParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockRunnerForLease, arg.OrgID, arg.ID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const releaseLease = `-- name: ReleaseLease :execrows
+UPDATE jobs
+SET status = 'queued', lease_id = NULL, lease_expires_at = NULL, runner_id = NULL,
+    attempt = attempt - 1, started_at = NULL, queued_at = $1
+WHERE org_id = $2 AND id = $3 AND status = 'running'
+  AND runner_id = $4 AND lease_id = $5 AND attempt > 0
+`
+
+type ReleaseLeaseParams struct {
+	Now      *time.Time
+	OrgID    string
+	ID       string
+	RunnerID *string
+	LeaseID  []byte
+}
+
+// ReleaseLease puts a job that was leased but never delivered back in the
+// queue without spending an attempt.
+func (q *Queries) ReleaseLease(ctx context.Context, arg ReleaseLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseLease,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.RunnerID,
+		arg.LeaseID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const renewLease = `-- name: RenewLease :one

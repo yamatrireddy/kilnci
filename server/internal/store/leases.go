@@ -35,19 +35,25 @@ func (s *Store) ListLeaseCandidates(ctx context.Context, orgID string, labels []
 // LeaseGrant describes a lease to acquire.
 type LeaseGrant struct {
 	OrgID, JobID, RunnerID string
-	RunnerLabels           []string
-	RunnerTrusted          bool
 	LeaseID                []byte
 	Now, ExpiresAt         time.Time
 }
 
-// AcquireLease moves a queued job to running under the lease in g. It
-// returns domain.ErrConflict if the job is no longer queued or no longer
-// matches the runner (someone else leased it first).
+// LockRunnerForLease locks a runner row so concurrent grants to the same
+// runner are serialized; domain.ErrNotFound if it does not exist.
+func (s *Store) LockRunnerForLease(ctx context.Context, orgID, runnerID string) error {
+	_, err := s.q(ctx).LockRunnerForLease(ctx, db.LockRunnerForLeaseParams{OrgID: orgID, ID: runnerID})
+	return mapErr("lock runner for lease", err)
+}
+
+// AcquireLease moves a queued job to running under the lease in g. The
+// runner's current row must still allow it (not revoked, labels, trust,
+// capacity). It returns domain.ErrConflict otherwise, or if someone else
+// leased the job first.
 func (s *Store) AcquireLease(ctx context.Context, g LeaseGrant) error {
 	n, err := s.q(ctx).AcquireLease(ctx, db.AcquireLeaseParams{
 		RunnerID: &g.RunnerID, LeaseID: g.LeaseID, LeaseExpiresAt: &g.ExpiresAt, Now: &g.Now,
-		OrgID: g.OrgID, ID: g.JobID, RunnerLabels: nonNil(g.RunnerLabels), RunnerTrusted: g.RunnerTrusted,
+		OrgID: g.OrgID, ID: g.JobID,
 	})
 	if err == nil && n == 0 {
 		return fmt.Errorf("acquire lease: %w", domain.ErrConflict)
@@ -77,6 +83,13 @@ func (s *Store) GetLeasedJob(ctx context.Context, ref LeaseRef, now time.Time) (
 		ExitCode: r.ExitCode, FailureReason: r.FailureReason, CreatedAt: r.CreatedAt, QueuedAt: r.QueuedAt,
 		StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
 	})
+}
+
+// ReleaseLease re-queues a job that was leased but never delivered, without
+// spending an attempt. It reports whether the lease was still held.
+func (s *Store) ReleaseLease(ctx context.Context, ref LeaseRef, now time.Time) (bool, error) {
+	n, err := s.q(ctx).ReleaseLease(ctx, db.ReleaseLeaseParams{Now: &now, OrgID: ref.OrgID, ID: ref.JobID, RunnerID: &ref.RunnerID, LeaseID: ref.LeaseID})
+	return n > 0, mapErr("release lease", err)
 }
 
 // LeaseState is what a heartbeat learns about its job.

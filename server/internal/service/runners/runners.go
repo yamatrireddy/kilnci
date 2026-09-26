@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -280,7 +281,8 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (Registrati
 		}
 		r := domain.Runner{
 			ID: runnerID, OrgID: tok.OrgID, Name: name, Labels: tok.Labels, Trusted: tok.Trusted, Version: version,
-			CertSerial: iss.Serial, CertRenewedAt: now, CertExpiresAt: iss.NotAfter, CreatedBy: tok.CreatedBy,
+			CertSerial: iss.Serial, CertDER: iss.DER, CertSPKIHash: iss.SPKIHash, CertRenewedAt: now,
+			CertExpiresAt: iss.NotAfter, CreatedBy: tok.CreatedBy,
 			CreatedAt: now, LastSeenAt: &now,
 		}
 		if err := s.store.CreateRunner(ctx, r); err != nil {
@@ -302,22 +304,30 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (Registrati
 	return reg, nil
 }
 
-// RenewCertificate issues a new certificate to an authenticated runner.
-// Only the current certificate may renew, and not more often than once a
-// quarter of a certificate lifetime. A renewal from any other serial means
-// two parties hold the runner's credentials: the runner is revoked and the
-// reuse is audited (ADR-0005 §4).
+// RenewCertificate issues a new certificate to an authenticated runner
+// (ADR-0005 §4):
+//   - from the current certificate: a new certificate is issued, at most
+//     once per quarter of a certificate lifetime;
+//   - from the certificate just replaced, within the grace period, with the
+//     same key as the new one: the renewal response was lost, so the current
+//     certificate is returned again (idempotent retry);
+//   - anything else means two parties hold the runner's credentials: the
+//     runner is revoked and the reuse is audited.
 func (s *Service) RenewCertificate(ctx context.Context, id pki.Identity, csrDER []byte) (pki.Issued, error) {
 	ctx, span := tracer.Start(ctx, "runners.RenewCertificate")
 	defer span.End()
 	if s.signer == nil {
 		return pki.Issued{}, ErrDisabled
 	}
+	keyHash, err := pki.CSRKeyHash(csrDER)
+	if err != nil {
+		return pki.Issued{}, domain.NewValidationError("csr", "must be a PKCS#10 request signed by an ECDSA P-256 or Ed25519 key")
+	}
 	now := s.now().UTC()
 	ctx = logging.WithOrgID(ctx, id.OrgID)
 	var issued pki.Issued
 	var reused bool
-	err := s.store.InTx(ctx, func(ctx context.Context) error {
+	err = s.store.InTx(ctx, func(ctx context.Context) error {
 		r, err := s.store.LockRunner(ctx, id.OrgID, id.RunnerID)
 		if errors.Is(err, domain.ErrNotFound) {
 			return domain.ErrUnauthenticated
@@ -328,16 +338,14 @@ func (s *Service) RenewCertificate(ctx context.Context, id pki.Identity, csrDER 
 		if r.RevokedAt != nil {
 			return domain.ErrUnauthenticated
 		}
-		if id.Serial != r.CertSerial {
+		switch {
+		case id.Serial == r.CertSerial:
+		case s.inGrace(r, id.Serial, now) && subtle.ConstantTimeCompare(keyHash, r.CertSPKIHash) == 1:
+			issued = pki.Issued{DER: r.CertDER, Serial: r.CertSerial, NotAfter: r.CertExpiresAt, SPKIHash: r.CertSPKIHash}
+			return nil
+		default:
 			reused = true
-			if err := s.store.RevokeRunner(ctx, r.OrgID, r.ID, now); err != nil {
-				return err //nolint:wrapcheck // store errors are contextual
-			}
-			return s.audit.Record(ctx, audit.Entry{
-				OrgID: r.OrgID, ActorKind: string(authz.KindRunner), ActorID: r.ID, Action: "runners:revoke",
-				TargetType: "runner", TargetID: r.ID, Result: domain.AuditDenied,
-				Details: map[string]string{"reason": "certificate_reuse", "presented_serial": id.Serial},
-			})
+			return s.revokeForReuse(ctx, r, id.Serial, now)
 		}
 		if now.Before(r.CertRenewedAt.Add(minRenewalInterval)) {
 			return fmt.Errorf("renewed too recently: %w", domain.ErrRateLimited)
@@ -350,12 +358,17 @@ func (s *Service) RenewCertificate(ctx context.Context, id pki.Identity, csrDER 
 			return err //nolint:wrapcheck // contextual
 		}
 		if err := s.store.RotateRunnerCertificate(ctx, store.CertRotation{
-			OrgID: r.OrgID, RunnerID: r.ID, CurrentSerial: r.CertSerial, NewSerial: iss.Serial, Now: now, ExpiresAt: iss.NotAfter,
+			OrgID: r.OrgID, RunnerID: r.ID, CurrentSerial: r.CertSerial, NewSerial: iss.Serial,
+			CertDER: iss.DER, SPKIHash: iss.SPKIHash, Now: now, ExpiresAt: iss.NotAfter,
 		}); err != nil {
 			return err //nolint:wrapcheck // store errors are contextual
 		}
 		issued = iss
-		return nil
+		return s.audit.Record(ctx, audit.Entry{
+			OrgID: r.OrgID, ActorKind: string(authz.KindRunner), ActorID: r.ID, Action: "runners:certificate:renew",
+			TargetType: "runner", TargetID: r.ID,
+			Details: map[string]string{"old_serial": r.CertSerial, "new_serial": iss.Serial, "expires_at": iss.NotAfter.Format(time.RFC3339)},
+		})
 	})
 	if err != nil {
 		return pki.Issued{}, fmt.Errorf("renew runner certificate: %w", err)
@@ -366,10 +379,32 @@ func (s *Service) RenewCertificate(ctx context.Context, id pki.Identity, csrDER 
 	return issued, nil
 }
 
+func (s *Service) inGrace(r domain.Runner, serial string, now time.Time) bool {
+	return r.PrevCertSerial != "" && serial == r.PrevCertSerial && now.Before(r.CertRenewedAt.Add(previousSerialGrace))
+}
+
+// revokeForReuse revokes a runner whose credentials were used from a
+// certificate that is no longer valid for it, and audits why. Only this CA
+// issues runner certificates, so a verified, unexpired certificate with a
+// stale serial means someone kept a copy of the runner's credentials.
+func (s *Service) revokeForReuse(ctx context.Context, r domain.Runner, presented string, now time.Time) error {
+	if err := s.store.RevokeRunner(ctx, r.OrgID, r.ID, now); err != nil {
+		return err //nolint:wrapcheck // store errors are contextual
+	}
+	return s.audit.Record(ctx, audit.Entry{
+		OrgID: r.OrgID, ActorKind: string(authz.KindRunner), ActorID: r.ID, Action: "runners:revoke",
+		TargetType: "runner", TargetID: r.ID, Result: domain.AuditDenied,
+		Details: map[string]string{"reason": "certificate_reuse", "presented_serial": presented, "current_serial": r.CertSerial},
+	})
+}
+
 // Authenticate maps a verified client certificate to the runner it
-// identifies, as recorded in the database. The runner must not be revoked,
+// identifies, as recorded in the database. The runner must not be revoked
 // and the certificate must be its current one (or the one it just
-// replaced, for a short grace period).
+// replaced, within the grace period). Any other certificate for a live
+// runner is credential reuse: the runner is revoked and the event audited
+// (ADR-0005 §4), so an attacker who renews with a stolen key cannot keep the
+// identity while the real runner is simply locked out.
 func (s *Service) Authenticate(ctx context.Context, id pki.Identity) (scheduler.Runner, error) {
 	r, err := s.store.GetRunner(ctx, id.OrgID, id.RunnerID)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -379,9 +414,23 @@ func (s *Service) Authenticate(ctx context.Context, id pki.Identity) (scheduler.
 		return scheduler.Runner{}, fmt.Errorf("authenticate runner: %w", err)
 	}
 	now := s.now().UTC()
-	current := id.Serial == r.CertSerial
-	previous := r.PrevCertSerial != "" && id.Serial == r.PrevCertSerial && now.Before(r.CertRenewedAt.Add(previousSerialGrace))
-	if r.RevokedAt != nil || (!current && !previous) {
+	if r.RevokedAt != nil {
+		return scheduler.Runner{}, domain.ErrUnauthenticated
+	}
+	if id.Serial != r.CertSerial && !s.inGrace(r, id.Serial, now) {
+		err := s.store.InTx(logging.WithOrgID(ctx, r.OrgID), func(ctx context.Context) error {
+			locked, err := s.store.LockRunner(ctx, r.OrgID, r.ID)
+			if err != nil {
+				return err //nolint:wrapcheck // store errors are contextual
+			}
+			if locked.RevokedAt != nil || id.Serial == locked.CertSerial || s.inGrace(locked, id.Serial, now) {
+				return nil // changed meanwhile
+			}
+			return s.revokeForReuse(ctx, locked, id.Serial, now)
+		})
+		if err != nil {
+			return scheduler.Runner{}, fmt.Errorf("authenticate runner: %w", err)
+		}
 		return scheduler.Runner{}, domain.ErrUnauthenticated
 	}
 	if err := s.store.TouchRunner(ctx, r.OrgID, r.ID, now); err != nil {

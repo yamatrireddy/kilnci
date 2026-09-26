@@ -22,7 +22,9 @@ import (
 type Store interface {
 	ProgressStore
 	ListLeaseCandidates(ctx context.Context, orgID string, labels []string, trusted bool, limit int32) ([]store.LeaseCandidate, error)
+	LockRunnerForLease(ctx context.Context, orgID, runnerID string) error
 	AcquireLease(ctx context.Context, g store.LeaseGrant) error
+	ReleaseLease(ctx context.Context, ref store.LeaseRef, now time.Time) (bool, error)
 	GetLeasedJob(ctx context.Context, ref store.LeaseRef, now time.Time) (domain.Job, error)
 	RenewLease(ctx context.Context, ref store.LeaseRef, now, expiresAt time.Time) (store.LeaseState, error)
 	CompleteLeasedJob(ctx context.Context, ref store.LeaseRef, res store.LeaseResult) error
@@ -136,9 +138,16 @@ func (s *Scheduler) tryLease(ctx context.Context, r Runner, c store.LeaseCandida
 		if err := engine.JobTransition(domain.JobQueued, domain.JobRunning); err != nil {
 			return err //nolint:wrapcheck // domain error
 		}
+		// Serialize grants per runner; the grant itself re-checks the
+		// runner's current row (revocation, labels, trust, capacity).
+		if err := s.store.LockRunnerForLease(ctx, r.OrgID, r.ID); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return domain.ErrUnauthenticated
+			}
+			return err //nolint:wrapcheck // store errors are contextual
+		}
 		if err := s.store.AcquireLease(ctx, store.LeaseGrant{
-			OrgID: r.OrgID, JobID: c.JobID, RunnerID: r.ID, RunnerLabels: r.Labels, RunnerTrusted: r.Trusted,
-			LeaseID: leaseID, Now: now, ExpiresAt: lease.ExpiresAt,
+			OrgID: r.OrgID, JobID: c.JobID, RunnerID: r.ID, LeaseID: leaseID, Now: now, ExpiresAt: lease.ExpiresAt,
 		}); err != nil {
 			return err //nolint:wrapcheck // store errors are contextual
 		}
@@ -156,6 +165,37 @@ func (s *Scheduler) tryLease(ctx context.Context, r Runner, c store.LeaseCandida
 
 func (s *Scheduler) ref(r Runner, jobID string, leaseID []byte) store.LeaseRef {
 	return store.LeaseRef{OrgID: r.OrgID, JobID: jobID, RunnerID: r.ID, LeaseID: leaseID}
+}
+
+// Release returns a job that was leased but never delivered to the runner
+// (the response could not be built or the caller went away) to the queue
+// without spending an attempt.
+func (s *Scheduler) Release(ctx context.Context, r Runner, jobID string, leaseID []byte) error {
+	ctx, span := tracer.Start(ctx, "scheduler.Release")
+	defer span.End()
+	ref := s.ref(r, jobID, leaseID)
+	now := s.now().UTC()
+	job, err := s.store.GetLeasedJob(ctx, ref, now)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil // already gone
+	}
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	err = s.store.InTx(ctx, func(ctx context.Context) error {
+		if _, err := s.store.LockRun(ctx, r.OrgID, job.RunID); err != nil {
+			return err //nolint:wrapcheck // store errors are contextual
+		}
+		if err := engine.JobTransition(domain.JobRunning, domain.JobQueued); err != nil {
+			return err //nolint:wrapcheck // domain error
+		}
+		_, err := s.store.ReleaseLease(ctx, ref, now)
+		return err //nolint:wrapcheck // store errors are contextual
+	})
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	return nil
 }
 
 // HeartbeatResult tells the runner whether to keep going.
@@ -285,16 +325,19 @@ func (s *Scheduler) Reap(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("reap: %w", err)
 	}
 	changed := 0
+	var errs []error
 	for _, e := range expired {
+		// One broken job must not stop every other lease from being reaped.
 		ok, err := s.reapOne(ctx, e, now)
 		if err != nil {
-			return changed, fmt.Errorf("reap job %s: %w", e.JobID, err)
+			errs = append(errs, fmt.Errorf("reap job %s: %w", e.JobID, err))
+			continue
 		}
 		if ok {
 			changed++
 		}
 	}
-	return changed, nil
+	return changed, errors.Join(errs...)
 }
 
 func (s *Scheduler) reapOne(ctx context.Context, e store.ExpiredLease, now time.Time) (bool, error) {

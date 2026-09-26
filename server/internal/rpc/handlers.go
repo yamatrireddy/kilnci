@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -31,6 +32,7 @@ type Scheduler interface {
 	Lease(ctx context.Context, r scheduler.Runner) (*scheduler.Lease, error)
 	Heartbeat(ctx context.Context, r scheduler.Runner, jobID string, leaseID []byte) (scheduler.HeartbeatResult, error)
 	Complete(ctx context.Context, r scheduler.Runner, jobID string, leaseID []byte, res scheduler.Result) error
+	Release(ctx context.Context, r scheduler.Runner, jobID string, leaseID []byte) error
 }
 
 // Checkout says where a run's code comes from and with which short-lived
@@ -52,6 +54,7 @@ type handlers struct {
 	opts        Options
 	regLimit    *ratelimit.Keyed
 	runnerLimit *ratelimit.Keyed
+	polls       pollLimiter
 }
 
 func (h *handlers) Register(ctx context.Context, req *runnerv1.RegisterRequest) (*runnerv1.RegisterResponse, error) {
@@ -73,13 +76,18 @@ func (h *handlers) RenewCertificate(ctx context.Context, req *runnerv1.RenewCert
 	return &runnerv1.RenewCertificateResponse{CertificateDer: iss.DER}, nil
 }
 
-// Lease long-polls the queue for up to LeaseWait.
+// Lease long-polls the queue for up to LeaseWait, backing off between
+// polls. Each runner may have at most maxPollsPerRunner polls in flight, so
+// one runner credential cannot multiply database load.
 func (h *handlers) Lease(ctx context.Context, _ *runnerv1.LeaseRequest) (*runnerv1.LeaseResponse, error) {
 	runner, _ := runnerFrom(ctx)
+	if !h.polls.acquire(runner.ID) {
+		return nil, status.Error(codes.ResourceExhausted, "too many concurrent lease requests")
+	}
+	defer h.polls.release(runner.ID)
 	deadline := time.NewTimer(h.opts.LeaseWait)
 	defer deadline.Stop()
-	tick := time.NewTicker(h.opts.LeasePoll)
-	defer tick.Stop()
+	wait := h.opts.LeasePoll
 	for {
 		lease, err := h.svc.Scheduler.Lease(ctx, runner)
 		if err != nil {
@@ -87,18 +95,63 @@ func (h *handlers) Lease(ctx context.Context, _ *runnerv1.LeaseRequest) (*runner
 		}
 		if lease != nil {
 			job, err := h.jobMessage(ctx, lease)
+			if err == nil && ctx.Err() != nil {
+				err = context.Cause(ctx)
+			}
 			if err != nil {
+				// The runner never received this job: give it back without
+				// spending an attempt.
+				if rerr := h.svc.Scheduler.Release(context.WithoutCancel(ctx), runner, lease.Job.ID, lease.ID); rerr != nil {
+					h.log.WarnContext(ctx, "release undelivered lease", "error", rerr)
+				}
 				return nil, h.toStatus(ctx, runnerv1.RunnerService_Lease_FullMethodName, err)
 			}
 			return &runnerv1.LeaseResponse{Job: job}, nil
 		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return nil, status.Error(status.FromContextError(ctx.Err()).Code(), "canceled")
 		case <-deadline.C:
+			t.Stop()
 			return &runnerv1.LeaseResponse{}, nil
-		case <-tick.C:
+		case <-t.C:
 		}
+		wait = min(wait*2, maxLeasePoll)
+	}
+}
+
+// maxLeasePoll caps the backoff between queue checks in one Lease call.
+const maxLeasePoll = 4 * time.Second
+
+// maxPollsPerRunner bounds concurrent Lease calls per runner.
+const maxPollsPerRunner = 2
+
+// pollLimiter counts in-flight Lease calls per runner.
+type pollLimiter struct {
+	mu       sync.Mutex
+	inFlight map[string]int
+}
+
+func (p *pollLimiter) acquire(runnerID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.inFlight == nil {
+		p.inFlight = map[string]int{}
+	}
+	if p.inFlight[runnerID] >= maxPollsPerRunner {
+		return false
+	}
+	p.inFlight[runnerID]++
+	return true
+}
+
+func (p *pollLimiter) release(runnerID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.inFlight[runnerID]--; p.inFlight[runnerID] <= 0 {
+		delete(p.inFlight, runnerID)
 	}
 }
 

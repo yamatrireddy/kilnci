@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/netutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -78,8 +79,11 @@ type Options struct {
 	Hostnames []string
 	// LeaseWait bounds how long Lease long-polls. Default 25s.
 	LeaseWait time.Duration
-	// LeasePoll is how often Lease re-checks the queue. Default 1s.
+	// LeasePoll is the first delay between queue checks in one Lease call;
+	// it doubles up to 4s. Default 250ms.
 	LeasePoll time.Duration
+	// MaxConnections bounds concurrent runner connections. Default 1000.
+	MaxConnections int
 	// RegistrationsPerIP per minute. Default 10.
 	RegistrationsPerIP float64
 	// CallsPerRunner per minute. Default 600.
@@ -98,8 +102,9 @@ type Services struct {
 
 // Server is the runner gRPC server.
 type Server struct {
-	grpc *grpc.Server
-	log  *slog.Logger
+	grpc     *grpc.Server
+	log      *slog.Logger
+	maxConns int
 }
 
 // New builds the server and validates the method policy.
@@ -117,7 +122,10 @@ func New(log *slog.Logger, svc Services, opts Options) (*Server, error) {
 		opts.LeaseWait = 25 * time.Second
 	}
 	if opts.LeasePoll <= 0 {
-		opts.LeasePoll = time.Second
+		opts.LeasePoll = 250 * time.Millisecond
+	}
+	if opts.MaxConnections <= 0 {
+		opts.MaxConnections = 1000
 	}
 	if opts.RegistrationsPerIP <= 0 {
 		opts.RegistrationsPerIP = 10
@@ -156,7 +164,7 @@ func New(log *slog.Logger, svc Services, opts Options) (*Server, error) {
 		grpc.ChainStreamInterceptor(denyStreams),
 	)
 	runnerv1.RegisterRunnerServiceServer(gs, h)
-	return &Server{grpc: gs, log: log}, nil
+	return &Server{grpc: gs, log: log, maxConns: opts.MaxConnections}, nil
 }
 
 func checkPolicy(desc grpc.ServiceDesc) error {
@@ -180,6 +188,7 @@ func checkPolicy(desc grpc.ServiceDesc) error {
 // (bounded by shutdown).
 func (s *Server) Serve(ctx context.Context, lis net.Listener, shutdown time.Duration) error {
 	errc := make(chan error, 1)
+	lis = netutil.LimitListener(lis, s.maxConns)
 	go func() { errc <- s.grpc.Serve(lis) }()
 	select {
 	case err := <-errc:

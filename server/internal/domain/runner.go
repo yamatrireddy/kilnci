@@ -15,9 +15,16 @@ type Runner struct {
 	Labels  []string
 	Trusted bool
 	Version string
+	// Capacity is how many jobs the runner may hold at once.
+	Capacity int
 	// CertSerial is the current client-certificate serial (hex);
 	// PrevCertSerial the one it replaced, accepted briefly after renewal.
-	CertSerial     string
+	CertSerial string
+	// CertDER and CertSPKIHash describe the current certificate, so a
+	// renewal retried after a lost response returns it instead of looking
+	// like credential reuse.
+	CertDER        []byte
+	CertSPKIHash   []byte
 	PrevCertSerial string
 	CertRenewedAt  time.Time
 	CertExpiresAt  time.Time

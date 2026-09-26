@@ -64,24 +64,26 @@ func (q *Queries) CountActiveRunnerRegistrationTokens(ctx context.Context, arg C
 }
 
 const createRunner = `-- name: CreateRunner :exec
-INSERT INTO runners (id, org_id, name, labels, trusted, version, cert_serial, cert_renewed_at,
-    cert_expires_at, created_by, created_at, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO runners (id, org_id, name, labels, trusted, version, cert_serial, cert_der, cert_spki_sha256,
+    cert_renewed_at, cert_expires_at, created_by, created_at, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 `
 
 type CreateRunnerParams struct {
-	ID            string
-	OrgID         string
-	Name          string
-	Labels        []string
-	Trusted       bool
-	Version       string
-	CertSerial    string
-	CertRenewedAt time.Time
-	CertExpiresAt time.Time
-	CreatedBy     *string
-	CreatedAt     time.Time
-	LastSeenAt    *time.Time
+	ID             string
+	OrgID          string
+	Name           string
+	Labels         []string
+	Trusted        bool
+	Version        string
+	CertSerial     string
+	CertDer        []byte
+	CertSpkiSha256 []byte
+	CertRenewedAt  time.Time
+	CertExpiresAt  time.Time
+	CreatedBy      *string
+	CreatedAt      time.Time
+	LastSeenAt     *time.Time
 }
 
 func (q *Queries) CreateRunner(ctx context.Context, arg CreateRunnerParams) error {
@@ -93,6 +95,8 @@ func (q *Queries) CreateRunner(ctx context.Context, arg CreateRunnerParams) erro
 		arg.Trusted,
 		arg.Version,
 		arg.CertSerial,
+		arg.CertDer,
+		arg.CertSpkiSha256,
 		arg.CertRenewedAt,
 		arg.CertExpiresAt,
 		arg.CreatedBy,
@@ -148,8 +152,8 @@ func (q *Queries) DeleteExpiredRunnerRegistrationTokens(ctx context.Context, exp
 }
 
 const getRunner = `-- name: GetRunner :one
-SELECT id, org_id, name, labels, trusted, version, cert_serial, prev_cert_serial, cert_renewed_at,
-    cert_expires_at, created_by, created_at, last_seen_at, revoked_at
+SELECT id, org_id, name, labels, trusted, version, capacity, cert_serial, cert_der, cert_spki_sha256,
+    prev_cert_serial, cert_renewed_at, cert_expires_at, created_by, created_at, last_seen_at, revoked_at
 FROM runners
 WHERE org_id = $1 AND id = $2
 `
@@ -169,7 +173,10 @@ func (q *Queries) GetRunner(ctx context.Context, arg GetRunnerParams) (Runner, e
 		&i.Labels,
 		&i.Trusted,
 		&i.Version,
+		&i.Capacity,
 		&i.CertSerial,
+		&i.CertDer,
+		&i.CertSpkiSha256,
 		&i.PrevCertSerial,
 		&i.CertRenewedAt,
 		&i.CertExpiresAt,
@@ -182,8 +189,8 @@ func (q *Queries) GetRunner(ctx context.Context, arg GetRunnerParams) (Runner, e
 }
 
 const listRunners = `-- name: ListRunners :many
-SELECT id, org_id, name, labels, trusted, version, cert_serial, prev_cert_serial, cert_renewed_at,
-    cert_expires_at, created_by, created_at, last_seen_at, revoked_at
+SELECT id, org_id, name, labels, trusted, version, capacity, cert_serial, cert_der, cert_spki_sha256,
+    prev_cert_serial, cert_renewed_at, cert_expires_at, created_by, created_at, last_seen_at, revoked_at
 FROM runners
 WHERE org_id = $1 AND id > $2
 ORDER BY id
@@ -212,7 +219,10 @@ func (q *Queries) ListRunners(ctx context.Context, arg ListRunnersParams) ([]Run
 			&i.Labels,
 			&i.Trusted,
 			&i.Version,
+			&i.Capacity,
 			&i.CertSerial,
+			&i.CertDer,
+			&i.CertSpkiSha256,
 			&i.PrevCertSerial,
 			&i.CertRenewedAt,
 			&i.CertExpiresAt,
@@ -232,8 +242,8 @@ func (q *Queries) ListRunners(ctx context.Context, arg ListRunnersParams) ([]Run
 }
 
 const lockRunner = `-- name: LockRunner :one
-SELECT id, org_id, name, labels, trusted, version, cert_serial, prev_cert_serial, cert_renewed_at,
-    cert_expires_at, created_by, created_at, last_seen_at, revoked_at
+SELECT id, org_id, name, labels, trusted, version, capacity, cert_serial, cert_der, cert_spki_sha256,
+    prev_cert_serial, cert_renewed_at, cert_expires_at, created_by, created_at, last_seen_at, revoked_at
 FROM runners
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
@@ -254,7 +264,10 @@ func (q *Queries) LockRunner(ctx context.Context, arg LockRunnerParams) (Runner,
 		&i.Labels,
 		&i.Trusted,
 		&i.Version,
+		&i.Capacity,
 		&i.CertSerial,
+		&i.CertDer,
+		&i.CertSpkiSha256,
 		&i.PrevCertSerial,
 		&i.CertRenewedAt,
 		&i.CertExpiresAt,
@@ -308,25 +321,29 @@ func (q *Queries) RevokeRunner(ctx context.Context, arg RevokeRunnerParams) (int
 
 const rotateRunnerCertificate = `-- name: RotateRunnerCertificate :execrows
 UPDATE runners
-SET prev_cert_serial = cert_serial, cert_serial = $1,
-    cert_renewed_at = $2, cert_expires_at = $3
-WHERE org_id = $4 AND id = $5 AND cert_serial = $6
+SET prev_cert_serial = cert_serial, cert_serial = $1, cert_der = $2,
+    cert_spki_sha256 = $3, cert_renewed_at = $4, cert_expires_at = $5
+WHERE org_id = $6 AND id = $7 AND cert_serial = $8
   AND revoked_at IS NULL
 `
 
 type RotateRunnerCertificateParams struct {
-	NewSerial     string
-	Now           time.Time
-	ExpiresAt     time.Time
-	OrgID         string
-	ID            string
-	CurrentSerial string
+	NewSerial      string
+	CertDer        []byte
+	CertSpkiSha256 []byte
+	Now            time.Time
+	ExpiresAt      time.Time
+	OrgID          string
+	ID             string
+	CurrentSerial  string
 }
 
 // RotateRunnerCertificate records a renewal from the current serial.
 func (q *Queries) RotateRunnerCertificate(ctx context.Context, arg RotateRunnerCertificateParams) (int64, error) {
 	result, err := q.db.Exec(ctx, rotateRunnerCertificate,
 		arg.NewSerial,
+		arg.CertDer,
+		arg.CertSpkiSha256,
 		arg.Now,
 		arg.ExpiresAt,
 		arg.OrgID,
