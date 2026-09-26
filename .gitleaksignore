@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Per-finding gitleaks suppressions, by fingerprint (commit:file:rule:line).
+# Each entry needs a justification and maintainer approval (security-standards).
+# Never add a path- or rule-wide allowlist here; list individual findings only.
+
+# d523b24 TestCredentialParts used the made-up fixture "ghs_abc123456789" (and
+# its base64 Basic form). It is not a real token (real ghs_ tokens are 36 chars
+# after the prefix) and was never valid. Triaged 2026-09-26; the fixture has
+# since been rewritten to build its value at runtime, so only history matches.
+d523b24ee6e9eec04ad3b891294a25d94d15d756:runner/internal/agent/agent_test.go:generic-api-key:231
+d523b24ee6e9eec04ad3b891294a25d94d15d756:runner/internal/agent/agent_test.go:generic-api-key:232
+d523b24ee6e9eec04ad3b891294a25d94d15d756:runner/internal/agent/agent_test.go:generic-api-key:234

@@ -85,12 +85,7 @@ func register(ctx context.Context, args []string, stdin io.Reader, stderr io.Wri
 	if err != nil {
 		return fmt.Errorf("read CA: %w", err)
 	}
-	var tokenBytes []byte
-	if *tokenFile == "-" {
-		tokenBytes, err = io.ReadAll(io.LimitReader(stdin, 256))
-	} else {
-		tokenBytes, err = readOperatorFile(*tokenFile)
-	}
+	tokenBytes, err := readOperatorInput(*tokenFile, stdin)
 	if err != nil {
 		return fmt.Errorf("read token: %w", err)
 	}
@@ -111,6 +106,19 @@ func register(ctx context.Context, args []string, stdin io.Reader, stderr io.Wri
 	defer func() { _ = id.Close() }()
 	_, _ = fmt.Fprintf(stderr, "registered runner %s\n", id.RunnerID())
 	return nil
+}
+
+// readOperatorInput reads at most 256 bytes from stdin when path is "-", and
+// otherwise reads the operator-supplied file at path.
+func readOperatorInput(path string, stdin io.Reader) ([]byte, error) {
+	if path == "-" {
+		b, err := io.ReadAll(io.LimitReader(stdin, 256))
+		if err != nil {
+			return nil, fmt.Errorf("read stdin: %w", err)
+		}
+		return b, nil
+	}
+	return readOperatorFile(path)
 }
 
 // readOperatorFile reads a small file the operator named on the command line.

@@ -57,8 +57,13 @@ rules:
       - pattern-either:
           - pattern: bytes.Equal($A, $B)
           - pattern: $A == $B
-      # Nil checks compare no secret material.
+      # Nil, emptiness, and length checks compare no secret material, and
+      # `subtle.ConstantTimeCompare(...) == 1` is the constant-time idiom itself.
+      # Comparisons against any other literal (e.g. token == "admin") still fire.
       - pattern-not: $A == nil
+      - pattern-not: $A == ""
+      - pattern-not: len($X) == $Y
+      - pattern-not: subtle.ConstantTimeCompare(...) == $B
       - metavariable-regex:
           metavariable: $A
           regex: (?i).*(token|hash|signature|mac|secret|digest).*
