@@ -379,6 +379,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{orgSlug}/runners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        /** The org's runners (org admins) */
+        get: operations["listRunners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/runners/{runnerId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                runnerId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a runner (org admins); its certificate stops working immediately. Audited. */
+        delete: operations["revokeRunner"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/runner-registration-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a single-use runner registration token (org admins); the secret is returned once
+         * @description The runner exchanges the token and a CSR for its identity over the
+         *     runner gRPC port (ADR-0005). Labels and trust level are fixed here.
+         *     At most 20 unused tokens may be active per org. Audited.
+         */
+        post: operations["createRunnerRegistrationToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tokens": {
         parameters: {
             query?: never;
@@ -659,6 +722,46 @@ export interface components {
         LintResult: {
             valid: boolean;
             problems: components["schemas"]["LintProblem"][];
+        };
+        RunnerLabel: string;
+        Runner: {
+            id: components["schemas"]["ID"];
+            name: string;
+            labels: components["schemas"]["RunnerLabel"][];
+            trusted: boolean;
+            version: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            certExpiresAt: string;
+            /** Format: date-time */
+            lastSeenAt?: string | null;
+            /** Format: date-time */
+            revokedAt?: string | null;
+        };
+        RunnerList: {
+            items: components["schemas"]["Runner"][];
+            nextCursor?: string | null;
+        };
+        RunnerRegistrationTokenCreate: {
+            labels: components["schemas"]["RunnerLabel"][];
+            /** @description Trusted runners never run untrusted (fork) jobs and are the only ones that will receive secrets. */
+            trusted: boolean;
+            expiresInMinutes: number;
+        };
+        RunnerRegistrationToken: {
+            id: components["schemas"]["ID"];
+            labels: components["schemas"]["RunnerLabel"][];
+            trusted: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        RunnerRegistrationTokenCreated: {
+            /** @description The secret (kiln_rrt_...). Shown once; single use. */
+            token: string;
+            registrationToken: components["schemas"]["RunnerRegistrationToken"];
         };
     };
     responses: {
@@ -1424,6 +1527,99 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    listRunners: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of runners */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    revokeRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                runnerId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    createRunnerRegistrationToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerRegistrationTokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerRegistrationTokenCreated"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["Validation"];
             429: components["responses"]["RateLimited"];

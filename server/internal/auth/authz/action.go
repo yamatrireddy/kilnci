@@ -34,6 +34,9 @@ const (
 
 	ActionPipelinesLint Action = "pipelines:lint"
 
+	ActionRunnersList   Action = "runners:list"
+	ActionRunnersManage Action = "runners:manage"
+
 	ActionTokensList   Action = "tokens:list"
 	ActionTokensCreate Action = "tokens:create"
 	ActionTokensDelete Action = "tokens:delete"
@@ -84,6 +87,9 @@ var policy = map[Action]rule{
 	ActionRunsApprove: {minRole: domain.RoleDeveloper},
 
 	ActionPipelinesLint: {selfOnly: true}, // reads no tenant data
+
+	ActionRunnersList:   {minRole: domain.RoleAdmin},
+	ActionRunnersManage: {minRole: domain.RoleAdmin},
 
 	ActionTokensList:   {selfOnly: true},
 	ActionTokensCreate: {selfOnly: true},

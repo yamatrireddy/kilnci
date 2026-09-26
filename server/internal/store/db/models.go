@@ -167,6 +167,36 @@ type Run struct {
 	FinishedAt     *time.Time
 }
 
+type Runner struct {
+	ID             string
+	OrgID          string
+	Name           string
+	Labels         []string
+	Trusted        bool
+	Version        string
+	CertSerial     string
+	PrevCertSerial *string
+	CertRenewedAt  time.Time
+	CertExpiresAt  time.Time
+	CreatedBy      *string
+	CreatedAt      time.Time
+	LastSeenAt     *time.Time
+	RevokedAt      *time.Time
+}
+
+type RunnerRegistrationToken struct {
+	ID        string
+	OrgID     string
+	TokenHash []byte
+	Labels    []string
+	Trusted   bool
+	CreatedBy *string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	RunnerID  *string
+}
+
 type User struct {
 	ID            string
 	OidcIssuer    *string

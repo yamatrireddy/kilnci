@@ -9,6 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
+	github.com/yamatrireddy/kilnci/proto v0.0.0
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0
@@ -17,6 +18,7 @@ require (
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/time v0.16.0
+	google.golang.org/grpc v1.83.2
 )
 
 require (
@@ -84,6 +86,7 @@ require (
 	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
-	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
+
+replace github.com/yamatrireddy/kilnci/proto => ../proto

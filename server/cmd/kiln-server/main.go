@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,10 +27,13 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/platform/httpserver"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/ids"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/logging"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/pki"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/telemetry"
+	"github.com/yamatrireddy/kilnci/server/internal/rpc"
 	"github.com/yamatrireddy/kilnci/server/internal/scheduler"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
+	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
 	"github.com/yamatrireddy/kilnci/server/internal/store"
 )
@@ -54,6 +58,9 @@ func mainCode() int {
 }
 
 func run(ctx context.Context, args []string, src config.Source, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "runner-ca" {
+		return runnerCA(args[1:], stderr)
+	}
 	flags := flag.NewFlagSet("kiln-server", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	embedded := flags.Bool("embedded", false, "single-binary mode: needs only PostgreSQL")
@@ -123,19 +130,33 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 	orgSvc := orgs.NewService(st, authorizer, recorder, gen, nil)
 	sched := scheduler.New(st, log, scheduler.Options{}, nil)
 	runSvc := runs.NewService(st, authorizer, recorder, sched.Progressor(), gen, nil)
+	var ca *pki.CA
+	if cfg.Runner.Enabled() {
+		if ca, err = pki.Load(cfg.Runner.CADir); err != nil {
+			return err //nolint:wrapcheck // contextual, key-free
+		}
+	} else {
+		log.WarnContext(ctx, "runner listener disabled: set KILN_RUNNER_CA_DIR (see `kiln-server runner-ca init`) and KILN_RUNNER_HOSTNAMES")
+	}
+	var signer runners.Signer
+	if ca != nil {
+		signer = ca
+	}
+	runnerSvc := runners.NewService(st, authorizer, recorder, signer, gen, nil)
 
 	var webFS fs.FS
 	if cfg.Web.Dir != "" {
 		webFS = os.DirFS(cfg.Web.Dir)
 	}
 	handler, _, err := api.NewHandler(api.Deps{
-		Log:    log,
-		IDs:    gen,
-		Authn:  authSvc,
-		Auth:   authSvc,
-		Orgs:   orgSvc,
-		Runs:   runSvc,
-		Checks: map[string]api.ReadinessCheck{"database": st.Ping},
+		Log:     log,
+		IDs:     gen,
+		Authn:   authSvc,
+		Auth:    authSvc,
+		Orgs:    orgSvc,
+		Runs:    runSvc,
+		Runners: runnerSvc,
+		Checks:  map[string]api.ReadinessCheck{"database": st.Ping},
 		Options: api.Options{
 			MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,
 			AllowedOrigins: cfg.HTTP.AllowedOrigins,
@@ -169,10 +190,44 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		sched.RunReaper(gctx)
 		return nil
 	})
+	if ca != nil {
+		rpcSrv, err := rpc.New(log, rpc.Services{Runners: runnerSvc, Scheduler: sched}, rpc.Options{CA: ca, Hostnames: cfg.Runner.Hostnames})
+		if err != nil {
+			return fmt.Errorf("build runner server: %w", err)
+		}
+		lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Runner.Addr)
+		if err != nil {
+			return fmt.Errorf("listen for runners: %w", err)
+		}
+		log.InfoContext(ctx, "runner gRPC listening", "addr", lis.Addr().String())
+		g.Go(func() error { return rpcSrv.Serve(gctx, lis, cfg.HTTP.ShutdownTimeout) })
+	}
 	g.Go(func() error { return httpserver.Serve(gctx, log, srvOpts, handler, nil) })
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("serve: %w", err)
 	}
 	log.InfoContext(ctx, "kiln-server stopped")
+	return nil
+}
+
+// runnerCA implements `kiln-server runner-ca init --dir DIR`, which creates
+// the runner CA that KILN_RUNNER_CA_DIR points at. It never overwrites a key.
+func runnerCA(args []string, stderr io.Writer) error {
+	flags := flag.NewFlagSet("kiln-server runner-ca init", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dir := flags.String("dir", "", "directory to create ca.crt and ca.key in (mode 0700)")
+	if len(args) == 0 || args[0] != "init" {
+		return errors.New("usage: kiln-server runner-ca init --dir DIR")
+	}
+	if err := flags.Parse(args[1:]); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
+	if *dir == "" {
+		return errors.New("usage: kiln-server runner-ca init --dir DIR")
+	}
+	if err := pki.Init(*dir, time.Now()); err != nil {
+		return err //nolint:wrapcheck // contextual
+	}
+	_, _ = fmt.Fprintf(stderr, "created runner CA in %s; distribute %s to runner hosts and keep %s secret\n", *dir, pki.CertFile, pki.KeyFile)
 	return nil
 }

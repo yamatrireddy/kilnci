@@ -31,6 +31,7 @@ tags:
   - name: audit
   - name: runs
   - name: pipelines
+  - name: runners
 
 paths:
   /healthz:
@@ -571,6 +572,84 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/Internal" }
 
+  /api/v1/orgs/{orgSlug}/runners:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [runners]
+      operationId: listRunners
+      summary: The org's runners (org admins)
+      x-kiln-permission: runners:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of runners
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunnerList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/runners/{runnerId}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - name: runnerId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    delete:
+      tags: [runners]
+      operationId: revokeRunner
+      summary: Revoke a runner (org admins); its certificate stops working immediately. Audited.
+      x-kiln-permission: runners:manage
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/runner-registration-tokens:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    post:
+      tags: [runners]
+      operationId: createRunnerRegistrationToken
+      summary: Create a single-use runner registration token (org admins); the secret is returned once
+      description: |
+        The runner exchanges the token and a CSR for its identity over the
+        runner gRPC port (ADR-0005). Labels and trust level are fixed here.
+        At most 20 unused tokens may be active per org. Audited.
+      x-kiln-permission: runners:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunnerRegistrationTokenCreate" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunnerRegistrationTokenCreated" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
   /api/v1/tokens:
     get:
       tags: [tokens]
@@ -1098,3 +1177,63 @@ components:
         problems:
           type: array
           items: { $ref: "#/components/schemas/LintProblem" }
+
+    RunnerLabel:
+      type: string
+      pattern: "^[a-z0-9][a-z0-9._-]{0,62}$"
+    Runner:
+      type: object
+      additionalProperties: false
+      required: [id, name, labels, trusted, version, createdAt, certExpiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        labels: { type: array, items: { $ref: "#/components/schemas/RunnerLabel" } }
+        trusted: { type: boolean }
+        version: { type: string }
+        createdAt: { type: string, format: date-time }
+        certExpiresAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    RunnerList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Runner" }
+        nextCursor: { type: string, nullable: true }
+    RunnerRegistrationTokenCreate:
+      type: object
+      additionalProperties: false
+      required: [labels, trusted, expiresInMinutes]
+      properties:
+        labels:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/RunnerLabel" }
+        trusted:
+          type: boolean
+          description: Trusted runners never run untrusted (fork) jobs and are the only ones that will receive secrets.
+        expiresInMinutes: { type: integer, minimum: 5, maximum: 1440 }
+    RunnerRegistrationToken:
+      type: object
+      additionalProperties: false
+      required: [id, labels, trusted, createdAt, expiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        labels: { type: array, items: { $ref: "#/components/schemas/RunnerLabel" } }
+        trusted: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    RunnerRegistrationTokenCreated:
+      type: object
+      additionalProperties: false
+      required: [token, registrationToken]
+      properties:
+        token:
+          type: string
+          description: The secret (kiln_rrt_...). Shown once; single use.
+        registrationToken: { $ref: "#/components/schemas/RunnerRegistrationToken" }

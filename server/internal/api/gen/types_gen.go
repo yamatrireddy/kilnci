@@ -572,6 +572,58 @@ type RunList struct {
 // RunStatus defines model for RunStatus.
 type RunStatus string
 
+// Runner defines model for Runner.
+type Runner struct {
+	CertExpiresAt time.Time `json:"certExpiresAt"`
+	CreatedAt     time.Time `json:"createdAt"`
+
+	// Id Opaque ULID.
+	Id         ID            `json:"id"`
+	Labels     []RunnerLabel `json:"labels"`
+	LastSeenAt *time.Time    `json:"lastSeenAt,omitempty"`
+	Name       string        `json:"name"`
+	RevokedAt  *time.Time    `json:"revokedAt,omitempty"`
+	Trusted    bool          `json:"trusted"`
+	Version    string        `json:"version"`
+}
+
+// RunnerLabel defines model for RunnerLabel.
+type RunnerLabel = string
+
+// RunnerList defines model for RunnerList.
+type RunnerList struct {
+	Items      []Runner `json:"items"`
+	NextCursor *string  `json:"nextCursor,omitempty"`
+}
+
+// RunnerRegistrationToken defines model for RunnerRegistrationToken.
+type RunnerRegistrationToken struct {
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+
+	// Id Opaque ULID.
+	Id      ID            `json:"id"`
+	Labels  []RunnerLabel `json:"labels"`
+	Trusted bool          `json:"trusted"`
+}
+
+// RunnerRegistrationTokenCreate defines model for RunnerRegistrationTokenCreate.
+type RunnerRegistrationTokenCreate struct {
+	ExpiresInMinutes int           `json:"expiresInMinutes"`
+	Labels           []RunnerLabel `json:"labels"`
+
+	// Trusted Trusted runners never run untrusted (fork) jobs and are the only ones that will receive secrets.
+	Trusted bool `json:"trusted"`
+}
+
+// RunnerRegistrationTokenCreated defines model for RunnerRegistrationTokenCreated.
+type RunnerRegistrationTokenCreated struct {
+	RegistrationToken RunnerRegistrationToken `json:"registrationToken"`
+
+	// Token The secret (kiln_rrt_...). Shown once; single use.
+	Token string `json:"token"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	AuthMethod SessionAuthMethod `json:"authMethod"`
@@ -722,6 +774,13 @@ type ListRunsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListRunnersParams defines parameters for ListRunners.
+type ListRunnersParams struct {
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ExchangeTokenJSONRequestBody defines body for ExchangeToken for application/json ContentType.
 type ExchangeTokenJSONRequestBody = TokenRequest
 
@@ -736,6 +795,9 @@ type UpdateMemberJSONRequestBody = MemberUpdate
 
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = ProjectCreate
+
+// CreateRunnerRegistrationTokenJSONRequestBody defines body for CreateRunnerRegistrationToken for application/json ContentType.
+type CreateRunnerRegistrationTokenJSONRequestBody = RunnerRegistrationTokenCreate
 
 // LintPipelineJSONRequestBody defines body for LintPipeline for application/json ContentType.
 type LintPipelineJSONRequestBody = LintRequest

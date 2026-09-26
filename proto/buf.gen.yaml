@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Plugins run from the pinned tools module; `make generate-proto` sets GOWORK=off.
+version: v2
+plugins:
+  - local: ["go", "tool", "-modfile=../tools/go.mod", "protoc-gen-go"]
+    out: gen/go
+    opt: paths=source_relative
+  - local: ["go", "tool", "-modfile=../tools/go.mod", "protoc-gen-go-grpc"]
+    out: gen/go
+    opt: paths=source_relative

@@ -12,6 +12,7 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/auth/authz"
 	"github.com/yamatrireddy/kilnci/server/internal/domain"
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
+	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
 )
 
@@ -43,12 +44,14 @@ func (stubOrgs) ListOrgs(context.Context, orgs.PageRequest) (orgs.Page[domain.Or
 
 type stubRuns struct{ runs.Service }
 
+type stubRunners struct{ runners.Service }
+
 // TestRoutesMatchSpec enforces CLAUDE.md invariant 1 and the deny-by-default
 // rule: every OpenAPI operation is routed with exactly its x-kiln-permission,
 // and no route exists that the spec does not declare.
 func TestRoutesMatchSpec(t *testing.T) {
 	d := testDeps(t, nil)
-	d.Auth, d.Orgs, d.Runs = stubAuth{}, &stubOrgs{}, &stubRuns{}
+	d.Auth, d.Orgs, d.Runs, d.Runners = stubAuth{}, &stubOrgs{}, &stubRuns{}, &stubRunners{}
 	_, rt, err := NewHandler(d)
 	if err != nil {
 		t.Fatal(err)

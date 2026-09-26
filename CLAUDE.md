@@ -51,6 +51,7 @@ server/          Go control plane
   internal/engine/spec/     pipeline YAML parsing + validation
   internal/engine/dag/      execution graph planning
   internal/scheduler/       job queueing, leasing, retries, timeouts
+  internal/rpc/             runner gRPC transport (mTLS, method policy)
   internal/gitops/          reconcile loop, diff, sync, health
   internal/secrets/         envelope encryption, backends (local KMS key, Vault)
   internal/webhooks/        VCS ingest (GitHub, GitLab, Bitbucket)

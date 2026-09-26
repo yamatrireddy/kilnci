@@ -168,12 +168,12 @@ test (named). Updated for Phase 0 (ADR-0002, ADR-0003).
 
 | ID | STRIDE | Threat | L | I | Risk | Mitigations | Status |
 |---|---|---|---|---|---|---|---|
-| T-12 | S | Rogue runner registers and receives jobs with secrets | M | C | **High** | Single-use registration tokens, mTLS certs with short validity, admin approval option, runner label policies (SS §3) | P |
-| T-13 | E | Compromised runner requests jobs or secrets beyond its scope | M | C | **High** | Runner principal limited to leases for its labels; secrets bound to lease; lease-scoped log/artifact writes (SS §4, §7) | P |
-| T-14 | T | Compromised runner forges job results (marks failing tests as passed, swaps artifacts) | M | H | **High** | Results tied to lease; artifact digests recorded; provenance attestations signed server-side; protected deploys require trusted runners (SS §8) | P |
-| T-15 | I | Secrets intercepted in transit | L | C | **Medium** | mTLS 1.3, no plaintext fallback, cert pinning to Kiln CA | P |
-| T-16 | D | Runner holds leases without progress, starving the queue | M | M | **Medium** | Lease heartbeats with expiry, max job duration, per-runner concurrency caps | P |
-| T-17 | T | Protocol downgrade/mismatch exploited by old runner | L | M | **Low** | Version negotiation, minimum supported runner version enforced | P |
+| T-12 | S | Rogue runner registers and receives jobs with secrets | M | C | **High** | Single-use registration tokens, mTLS certs with short validity, admin approval option, runner label policies (SS §3) | V (single-use hashed `kiln_rrt_` tokens, CSR proof of possession, server-set identity, renewal only from the current serial with reuse revocation: TestRunnerProtocol_EndToEnd, TestRunnerProtocol_CertificateRenewalAndReuse, TestSignRunnerCSR_*); admin approval option: later |
+| T-13 | E | Compromised runner requests jobs or secrets beyond its scope | M | C | **High** | Runner principal limited to leases for its labels; secrets bound to lease; lease-scoped log/artifact writes (SS §4, §7) | V (runner principal loaded from the DB on every call; leases scoped to org + label subset; trusted runners never take untrusted jobs: TestLease_LabelsAndTrust, TestRunnerProtocol_LabelsComeFromTheServer); secrets bound to leases: Phase 2 |
+| T-14 | T | Compromised runner forges job results (marks failing tests as passed, swaps artifacts) | M | H | **High** | Results tied to lease; artifact digests recorded; provenance attestations signed server-side; protected deploys require trusted runners (SS §8) | I (results bound to lease ID + runner + unexpired lease: TestLease_BoundToRunnerAndLeaseID); artifact digests/provenance: Phase 3 |
+| T-15 | I | Secrets intercepted in transit | L | C | **Medium** | mTLS 1.3, no plaintext fallback, cert pinning to Kiln CA | I (TLS 1.3 only, mutual auth against the Kiln runner CA pinned by runners; foreign-CA certs rejected: TestRunnerProtocol_RejectsForeignCertificates) |
+| T-16 | D | Runner holds leases without progress, starving the queue | M | M | **Medium** | Lease heartbeats with expiry, max job duration, per-runner concurrency caps | V (lease expiry + reaper, hard job timeouts, long-poll cap, per-runner rate limits: TestReap_RequeuesThenFailsExpiredLeases, TestHeartbeat_ReportsCancelAndTimeout) |
+| T-17 | T | Protocol downgrade/mismatch exploited by old runner | L | M | **Low** | Version negotiation, minimum supported runner version enforced | I (protocol_version on every request; unsupported versions get FAILED_PRECONDITION: TestAuthorize_DeniesUnknownMethodsAndBadVersions) |
 
 ### B3 — Runner → job sandbox (highest-risk boundary)
 

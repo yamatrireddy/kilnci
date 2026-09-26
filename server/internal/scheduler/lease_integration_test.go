@@ -111,8 +111,18 @@ func (e *env) runStatus(runID string) domain.RunStatus {
 	return r.Status
 }
 
+// runner registers a runner row (jobs reference their runner by foreign key).
 func (e *env) runner(labels []string, trusted bool) scheduler.Runner {
-	return scheduler.Runner{ID: ids.NewGenerator(nil).New(), OrgID: e.org.ID, Labels: labels, Trusted: trusted}
+	e.t.Helper()
+	id := ids.NewGenerator(nil).New()
+	now := e.clk.now()
+	if err := e.st.CreateRunner(e.t.Context(), domain.Runner{
+		ID: id, OrgID: e.org.ID, Name: "r", Labels: labels, Trusted: trusted, CertSerial: id,
+		CertRenewedAt: now, CertExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return scheduler.Runner{ID: id, OrgID: e.org.ID, Labels: labels, Trusted: trusted}
 }
 
 const twoJobs = `version: 1
@@ -273,12 +283,16 @@ func TestLease_ConcurrentRunnersNeverShareAJob(t *testing.T) {
 	}
 	var mu sync.Mutex
 	seen := map[string]bool{}
+	runnersList := make([]scheduler.Runner, 2*n)
+	for i := range runnersList {
+		runnersList[i] = e.runner(nil, false)
+	}
 	var wg sync.WaitGroup
-	for range 2 * n {
+	for _, rn := range runnersList {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			l, err := e.sched.Lease(t.Context(), e.runner(nil, false))
+			l, err := e.sched.Lease(t.Context(), rn)
 			if err != nil {
 				t.Errorf("lease: %v", err)
 				return

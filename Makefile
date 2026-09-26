@@ -54,12 +54,17 @@ infra-down: ## Stop local infrastructure
 ## ----------------------------------------------------------------- codegen
 
 .PHONY: generate
-generate: generate-sql generate-openapi ## Regenerate all generated code (sqlc, OpenAPI Go + TS)
+generate: generate-sql generate-proto generate-openapi ## Regenerate all generated code (sqlc, protobuf, OpenAPI Go + TS)
 
 .PHONY: generate-sql
 generate-sql:
 	cd server && $(call tool,sqlc) generate
 	bash scripts/spdx-prepend.sh // server/internal/store/db/*.go
+
+.PHONY: generate-proto
+generate-proto:
+	cd proto && GOWORK=off $(call tool,buf) lint
+	cd proto && GOWORK=off $(call tool,buf) generate
 
 .PHONY: generate-openapi
 generate-openapi:

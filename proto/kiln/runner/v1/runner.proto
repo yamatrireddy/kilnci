@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Runner <-> control plane protocol (ADR-0005). Runners always initiate
+// calls (invariant 2); the server never connects to a runner. Every call
+// except Register is authenticated by a Kiln-CA client certificate over
+// TLS 1.3. Changes are additive only: never renumber or reuse fields.
+syntax = "proto3";
+
+package kiln.runner.v1;
+
+option go_package = "github.com/yamatrireddy/kilnci/proto/gen/go/kiln/runner/v1;runnerv1";
+
+// RunnerService is the whole runner API.
+service RunnerService {
+  // Register exchanges a single-use registration token and a CSR for a
+  // runner identity and a short-lived client certificate.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // RenewCertificate issues a new client certificate for a new key. Only the
+  // current certificate may renew; anything else revokes the runner.
+  rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+  // Lease long-polls (up to ~25 s) for a job this runner may run.
+  rpc Lease(LeaseRequest) returns (LeaseResponse);
+  // Heartbeat renews a lease and reports cancellation.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // CompleteJob reports a leased job's result and releases the lease.
+  rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
+}
+
+// RegisterRequest carries the registration token and the runner's CSR.
+message RegisterRequest {
+  uint32 protocol_version = 1;
+  // registration_token is the kiln_rrt_ token created by an org admin.
+  string registration_token = 2;
+  // csr_der is a PKCS#10 request signed by the runner's new private key.
+  // Its subject and extensions are ignored; the server sets the identity.
+  bytes csr_der = 3;
+  // name is a display name for the runner (1-100 characters).
+  string name = 4;
+  // version is the runner's software version, for display.
+  string version = 5;
+}
+
+// RegisterResponse returns the runner's identity and first certificate.
+message RegisterResponse {
+  string runner_id = 1;
+  bytes certificate_der = 2;
+  // ca_certificate_der is the Kiln runner CA, for pinning.
+  bytes ca_certificate_der = 3;
+}
+
+// RenewCertificateRequest carries a CSR for a new key.
+message RenewCertificateRequest {
+  uint32 protocol_version = 1;
+  bytes csr_der = 2;
+}
+
+// RenewCertificateResponse returns the new certificate.
+message RenewCertificateResponse {
+  bytes certificate_der = 1;
+}
+
+// LeaseRequest asks for a job. Labels and trust come from the server's
+// record of the runner, never from the request.
+message LeaseRequest {
+  uint32 protocol_version = 1;
+}
+
+// LeaseResponse holds a job, or no job if none became available in time.
+message LeaseResponse {
+  Job job = 1;
+}
+
+// Job is everything a runner needs to execute one leased job.
+message Job {
+  string job_id = 1;
+  bytes lease_id = 2;
+  int64 lease_expires_at_unix_ms = 3;
+  string run_id = 4;
+  string name = 5;
+  string image = 6;
+  repeated Step steps = 7;
+  // env holds the job environment including the KILN_* variables.
+  repeated EnvVar env = 8;
+  int64 timeout_seconds = 9;
+  Checkout checkout = 10;
+  // trusted is false for fork and other untrusted runs (ADR-0006 §4:
+  // untrusted jobs pull images anonymously).
+  bool trusted = 11;
+  // mask_values are extra values the runner must mask in logs.
+  repeated string mask_values = 12;
+}
+
+// Step is one script run with /bin/sh -e -c in the job container.
+message Step {
+  string name = 1;
+  string run = 2;
+  repeated EnvVar env = 3;
+  // timeout_seconds is 0 when bounded only by the job timeout.
+  int64 timeout_seconds = 4;
+}
+
+// EnvVar is one environment variable.
+message EnvVar {
+  string name = 1;
+  string value = 2;
+}
+
+// Checkout tells the runner which commit to fetch into the workspace.
+message Checkout {
+  // repository_url is an https clone URL without credentials.
+  string repository_url = 1;
+  string commit_sha = 2;
+  // authorization_header is a short-lived, read-only HTTP Authorization
+  // header value for the fetch, or empty for public repositories. It must
+  // only reach the clone step (ADR-0006 §3) and must be masked.
+  string authorization_header = 3;
+}
+
+// HeartbeatRequest renews the lease on job_id.
+message HeartbeatRequest {
+  uint32 protocol_version = 1;
+  string job_id = 2;
+  bytes lease_id = 3;
+}
+
+// HeartbeatResponse says how long the lease now lasts and whether to stop.
+message HeartbeatResponse {
+  int64 lease_expires_at_unix_ms = 1;
+  bool cancel = 2;
+  string cancel_reason = 3;
+}
+
+// JobResult is how a job ended.
+enum JobResult {
+  JOB_RESULT_UNSPECIFIED = 0;
+  JOB_RESULT_SUCCEEDED = 1;
+  JOB_RESULT_FAILED = 2;
+  JOB_RESULT_CANCELED = 3;
+}
+
+// CompleteJobRequest reports a leased job's result.
+message CompleteJobRequest {
+  uint32 protocol_version = 1;
+  string job_id = 2;
+  bytes lease_id = 3;
+  JobResult result = 4;
+  optional int32 exit_code = 5;
+  // failure_reason is short display text (at most 1 KiB is kept).
+  string failure_reason = 6;
+}
+
+// CompleteJobResponse is empty.
+message CompleteJobResponse {}

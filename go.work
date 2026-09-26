@@ -1,4 +1,7 @@
 go 1.27.0
 
 // tools/ is intentionally not listed; see Makefile.
-use ./server
+use (
+	./proto
+	./server
+)

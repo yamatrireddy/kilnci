@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +58,7 @@ type Config struct {
 	Auth     Auth
 	Web      Web
 	Tracing  Tracing
+	Runner   Runner
 }
 
 // HTTP configures the listener and HTTP behavior.
@@ -131,6 +133,20 @@ type Web struct {
 	Dir string
 }
 
+// Runner configures the runner gRPC listener (ADR-0005).
+type Runner struct {
+	// Addr is the gRPC listen address (default ":9443").
+	Addr string
+	// CADir holds the runner CA (ca.crt, ca.key). Empty disables the
+	// runner listener.
+	CADir string
+	// Hostnames the runner server certificate is issued for.
+	Hostnames []string
+}
+
+// Enabled reports whether the runner listener is configured.
+func (r Runner) Enabled() bool { return r.CADir != "" }
+
 // Tracing configures OpenTelemetry export.
 type Tracing struct {
 	// OTLPEndpoint (host:port) enables OTLP/HTTP trace export when set.
@@ -198,6 +214,10 @@ func Load(src Source, embedded bool) (*Config, error) {
 	c.Auth.BootstrapAdminEmails = lower(p.list("KILN_AUTH_BOOTSTRAP_ADMIN_EMAILS"))
 
 	c.Web.Dir = p.str("KILN_WEB_DIR", "")
+
+	c.Runner.Addr = p.str("KILN_RUNNER_ADDR", ":9443")
+	c.Runner.CADir = p.str("KILN_RUNNER_CA_DIR", "")
+	c.Runner.Hostnames = lower(p.list("KILN_RUNNER_HOSTNAMES"))
 
 	c.Tracing.OTLPEndpoint = p.str("KILN_OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	c.Tracing.Insecure = p.bool("KILN_OTEL_EXPORTER_OTLP_INSECURE", false)
@@ -308,8 +328,24 @@ func (c *Config) validate() []error {
 	if c.Auth.DesktopRefreshTokenTTL <= 0 || c.Auth.DesktopRefreshTokenTTL > 90*24*time.Hour {
 		add("KILN_DESKTOP_REFRESH_TOKEN_TTL must be between 1s and 2160h")
 	}
+
+	if c.Runner.Enabled() {
+		if len(c.Runner.Hostnames) == 0 {
+			add("KILN_RUNNER_HOSTNAMES is required when KILN_RUNNER_CA_DIR is set (names runners use to reach this server)")
+		}
+		for _, h := range c.Runner.Hostnames {
+			if net.ParseIP(h) == nil && !hostnamePattern.MatchString(h) {
+				add("KILN_RUNNER_HOSTNAMES: %q is not a hostname or IP address", h)
+			}
+		}
+		if _, _, err := net.SplitHostPort(c.Runner.Addr); err != nil {
+			add("KILN_RUNNER_ADDR must be host:port")
+		}
+	}
 	return errs
 }
+
+var hostnamePattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func isLoopbackHost(h string) bool {
 	if h == "localhost" {

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Runner <-> server protocol (ADR-0005). Changes are additive only: never
+# renumber or reuse fields; `buf breaking` guards this in CI.
+version: v2
+modules:
+  - path: .
+lint:
+  use: [STANDARD]
+breaking:
+  use: [WIRE_JSON]

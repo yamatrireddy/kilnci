@@ -69,6 +69,26 @@ func TestLoad_ValidMinimal_UsesSecureDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_RunnerListener(t *testing.T) {
+	c, err := Load(source(validEnv(), nil), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Runner.Enabled() || c.Runner.Addr != ":9443" {
+		t.Fatalf("runner listener must be off by default: %+v", c.Runner)
+	}
+	env := validEnv()
+	env["KILN_RUNNER_CA_DIR"] = "/etc/kiln/runner-ca"
+	env["KILN_RUNNER_HOSTNAMES"] = "Runners.Example.com, 10.0.0.5"
+	c, err = Load(source(env, nil), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Runner.Enabled() || c.Runner.Hostnames[0] != "runners.example.com" || c.Runner.Hostnames[1] != "10.0.0.5" {
+		t.Fatalf("runner = %+v", c.Runner)
+	}
+}
+
 func TestLoad_TLSServerModeIsDefault_RequiresCert(t *testing.T) {
 	env := validEnv()
 	delete(env, "KILN_TLS_MODE")
@@ -120,6 +140,16 @@ func TestLoad_Rejects(t *testing.T) {
 		{"max conns", func(e map[string]string) { e["KILN_DB_MAX_CONNS"] = "0" }, "MAX_CONNS"},
 		{"bad int", func(e map[string]string) { e["KILN_DB_MAX_CONNS"] = "many" }, "integer"},
 		{"negative timeout", func(e map[string]string) { e["KILN_SHUTDOWN_TIMEOUT"] = "-1s" }, "positive"},
+		{"runner ca without hostnames", func(e map[string]string) { e["KILN_RUNNER_CA_DIR"] = "/ca" }, "KILN_RUNNER_HOSTNAMES is required"},
+		{"bad runner hostname", func(e map[string]string) {
+			e["KILN_RUNNER_CA_DIR"] = "/ca"
+			e["KILN_RUNNER_HOSTNAMES"] = "runners.example.com,bad_host!"
+		}, "not a hostname"},
+		{"bad runner addr", func(e map[string]string) {
+			e["KILN_RUNNER_CA_DIR"] = "/ca"
+			e["KILN_RUNNER_HOSTNAMES"] = "runners.example.com"
+			e["KILN_RUNNER_ADDR"] = "9443"
+		}, "KILN_RUNNER_ADDR"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

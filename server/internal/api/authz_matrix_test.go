@@ -5,6 +5,10 @@
 package api_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"fmt"
 	"net/http"
 	"sort"
@@ -13,6 +17,7 @@ import (
 
 	"github.com/yamatrireddy/kilnci/server/internal/domain"
 	"github.com/yamatrireddy/kilnci/server/internal/engine/spec"
+	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
 
 	"github.com/yamatrireddy/kilnci/server/internal/store/storetest"
@@ -186,6 +191,14 @@ func TestAuthzMatrix(t *testing.T) {
 		}, statuses(200, 200, 200, 403, 404, 401, 403)},
 		{"POST", "/api/v1/pipelines/lint", static("/api/v1/pipelines/lint", `{"pipeline":"version: 1"}`),
 			statuses(200, 200, 200, 200, 200, 401, 200)},
+		{"GET", "/api/v1/orgs/{orgSlug}/runners", func(*fixture) (string, string) { return org("/runners"), "" },
+			statuses(200, 200, 403, 403, 404, 401, 403)},
+		{"DELETE", "/api/v1/orgs/{orgSlug}/runners/{runnerId}", func(f *fixture) (string, string) {
+			return org("/runners/" + f.newRunner()), ""
+		}, statuses(204, 204, 403, 403, 404, 401, 403)},
+		{"POST", "/api/v1/orgs/{orgSlug}/runner-registration-tokens", func(*fixture) (string, string) {
+			return org("/runner-registration-tokens"), `{"labels":[],"trusted":true,"expiresInMinutes":5}`
+		}, statuses(201, 201, 403, 403, 404, 401, 403)},
 		// Everyone but the owner targets someone else's token: not found.
 		{"DELETE", "/api/v1/tokens/{tokenId}", func(f *fixture) (string, string) { return "/api/v1/tokens/" + f.ownerToken(), "" },
 			statuses(204, 404, 404, 404, 404, 401, 403)},
@@ -236,6 +249,31 @@ func TestAuthzMatrix(t *testing.T) {
 	if err := f.env.recorder.VerifyChain(t.Context(), orgID); err != nil {
 		t.Fatalf("audit chain: %v", err)
 	}
+}
+
+// newRunner registers a runner in org A through the real token + CSR flow.
+func (f *fixture) newRunner() string {
+	e := f.env
+	e.t.Helper()
+	rec := e.do(f.actors[owner], http.MethodPost, "/api/v1/orgs/"+f.org+"/runner-registration-tokens",
+		`{"labels":["linux"],"trusted":false,"expiresInMinutes":10}`)
+	e.mustStatus(rec, http.StatusCreated)
+	tok := decode[struct {
+		Token string `json:"token"`
+	}](e.t, rec).Token
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	reg, err := e.runners.Register(e.t.Context(), runners.RegisterRequest{Token: tok, CSRDER: csr, Name: "r1"})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return reg.Runner.ID
 }
 
 // testPipeline has two jobs, the second needing the first.

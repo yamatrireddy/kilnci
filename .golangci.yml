@@ -62,7 +62,7 @@ linters:
           # Handlers never call store directly. Integration tests (_test.go)
           # wire the real stack end to end and are exempt.
           list-mode: lax
-          files: ["**/internal/api/**", "!$test"]
+          files: ["**/internal/api/**", "**/internal/rpc/**", "!$test"]
           deny:
             - pkg: github.com/yamatrireddy/kilnci/server/internal/store
               desc: handlers call services, never store (coding-standards §1)
@@ -137,6 +137,10 @@ linters:
         - errors\.New\(
         - errors\.Join\(
         - \.Wait\(\)
+        # gRPC status errors are terminal values for the wire, built in one
+        # mapping place (internal/rpc); wrapping them would lose the code.
+        - status\.Error\(
+        - status\.Errorf\(
       ignore-package-globs:
         - github.com/yamatrireddy/kilnci/*
     exhaustive:

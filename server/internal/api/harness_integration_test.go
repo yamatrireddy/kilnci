@@ -20,9 +20,11 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/auth/authz"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/ids"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/logging"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/pki"
 	"github.com/yamatrireddy/kilnci/server/internal/scheduler"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
+	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
 	"github.com/yamatrireddy/kilnci/server/internal/store"
 	"github.com/yamatrireddy/kilnci/server/internal/store/storetest"
@@ -56,6 +58,7 @@ type env struct {
 	idp      *authtest.FakeIDP
 	recorder *audit.Recorder
 	runs     *runs.Service
+	runners  *runners.Service
 	clock    *clock
 	// bootstrap is the instance admin's email for this env.
 	bootstrap string
@@ -82,8 +85,17 @@ func newEnv(t *testing.T) *env {
 	})
 	orgSvc := orgs.NewService(st, az, rec, gen, clk.now)
 	runSvc := runs.NewService(st, az, rec, scheduler.NewProgressor(st, clk.now), gen, clk.now)
+	caDir := t.TempDir() + "/ca"
+	if err := pki.Init(caDir, clk.now()); err != nil {
+		t.Fatal(err)
+	}
+	ca, err := pki.Load(caDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runnerSvc := runners.NewService(st, az, rec, ca, gen, clk.now)
 	h, rt, err := api.NewHandler(api.Deps{
-		Log: logging.Discard(), IDs: gen, Authn: authSvc, Auth: authSvc, Orgs: orgSvc, Runs: runSvc,
+		Log: logging.Discard(), IDs: gen, Authn: authSvc, Auth: authSvc, Orgs: orgSvc, Runs: runSvc, Runners: runnerSvc,
 		Options: api.Options{
 			MaxBodyBytes: 1 << 20,
 			HSTS:         true,
@@ -93,7 +105,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, h: h, rt: rt, st: st, idp: idp, recorder: rec, runs: runSvc, clock: clk, bootstrap: bootstrap, keys: map[string]string{}}
+	return &env{t: t, h: h, rt: rt, st: st, idp: idp, recorder: rec, runs: runSvc, runners: runnerSvc, clock: clk, bootstrap: bootstrap, keys: map[string]string{}}
 }
 
 // client is one caller: anonymous, a browser session, or a bearer token.
