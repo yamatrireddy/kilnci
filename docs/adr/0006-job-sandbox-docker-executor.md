@@ -71,9 +71,12 @@ default, and blocked for fork PRs. Phase 1 ships one executor: Docker.
    `base64` and PEM output are), URL-encoded, lower- and upper-case hex, and
    JSON-escaped forms, per-line pieces of multi-line values, and matches
    split across chunk boundaries; output is the same however it is split
-   into writes. Known gaps: values shorter than 4 bytes, base64 wrapped
-   narrower than 16 columns, up to 3 characters at a wrapped line's edge,
-   and any encoding not listed. Masking is a safety net, not a boundary.
+   into writes. To bound memory and output delay, the runner refuses a job
+   whose values exceed 64 KiB each or 256 KiB in total, and masks wrapped
+   base64 only for values up to 4 KiB. Known gaps: values shorter than 4
+   bytes, base64 wrapped narrower than 16 columns, up to 3 characters at a
+   wrapped line's edge, and any encoding not listed. Masking is a safety
+   net, not a boundary.
 
 6. **Shell and Kubernetes executors.** The shell executor is not built
    (so it cannot be enabled by accident). Kubernetes (PSS `restricted`) is
