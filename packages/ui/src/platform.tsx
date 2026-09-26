@@ -12,6 +12,12 @@ export interface Platform {
   client: KilnClient;
   /** Begins sign-in and eventually returns the user to `returnTo`. */
   signIn: (returnTo: string) => void | Promise<void>;
+  /**
+   * True when `client.streamJobLog` can follow a log live, i.e. the client's
+   * fetch streams response bodies. Otherwise the log viewer re-reads the
+   * stored log while a job runs.
+   */
+  liveLogs?: boolean;
   /** Called after the server session or grant has been revoked. */
   afterSignOut?: () => void | Promise<void>;
 }

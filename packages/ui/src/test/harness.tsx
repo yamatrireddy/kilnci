@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ApiError, type KilnClient, type Org, type Session } from "@kiln/api-client";
+import { ApiError, type Job, type KilnClient, type LogStreamEvent, type Org, type Run, type RunDetail, type Session } from "@kiln/api-client";
 import { render } from "@testing-library/react";
 import axe from "axe-core";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -17,6 +17,51 @@ export const session: Session = {
 };
 
 export const acme: Org = { id: "01ARZ3NDEKTSV4RRFFQ69G5FA2", slug: "acme", name: "Acme", role: "owner", createdAt: "2026-01-01T00:00:00Z" };
+
+export const run1: Run = {
+  id: "01ARZ3NDEKTSV4RRFFQ69G5FB1",
+  number: 42,
+  status: "running",
+  event: "pull_request",
+  ref: "refs/pull/7/head",
+  branch: "feature/<b>bold</b>",
+  commitSha: "0123456789abcdef0123456789abcdef01234567",
+  title: "Fix the <script>alert(1)</script> bug",
+  prNumber: 7,
+  isFork: true,
+  trusted: false,
+  actorLogin: "octocat",
+  createdAt: "2026-01-01T00:00:00Z",
+  startedAt: "2026-01-01T00:00:05Z",
+  finishedAt: null,
+};
+
+function job(id: string, name: string, status: Job["status"]): Job {
+  return {
+    id, name, status, needs: [], image: "golang:1.27", labels: [], steps: [{ name: "test" }], attempt: 1, maxAttempts: 2,
+    timeoutSeconds: 3600, failureReason: "", exitCode: null, queuedAt: null, startedAt: "2026-01-01T00:00:05Z", finishedAt: null,
+  };
+}
+
+export const runDetail: RunDetail = {
+  run: run1,
+  jobs: [job("01ARZ3NDEKTSV4RRFFQ69G5FC1", "lint", "succeeded"), job("01ARZ3NDEKTSV4RRFFQ69G5FC2", "build", "running"), job("01ARZ3NDEKTSV4RRFFQ69G5FC3", "deploy", "pending")],
+};
+
+const enc = new TextEncoder();
+
+/** A log stream event carrying `text` as chunk `seq` of `attempt`. */
+export function chunk(attempt: number, seq: number, text: string): LogStreamEvent {
+  return { type: "chunk", id: `${String(attempt)}.${String(seq)}`, attempt, seq, data: enc.encode(text) };
+}
+
+/** A fake streamJobLog that yields `events`, then ends the stream. */
+export function streamOf(...events: LogStreamEvent[]) {
+  return async function* () {
+    await Promise.resolve();
+    for (const ev of events) yield ev;
+  };
+}
 
 export function problem(status: number): ApiError {
   return new ApiError(status, { type: "urn:kiln:problem:x", title: "x", status, requestId: "req-123" });
@@ -55,6 +100,14 @@ export function fakeClient(overrides: Partial<Record<keyof KilnClient, unknown>>
           },
         ],
       }),
+    ),
+    listRuns: vi.fn(() => Promise.resolve({ items: [run1], nextCursor: null })),
+    getRun: vi.fn(() => Promise.resolve(runDetail)),
+    cancelRun: vi.fn(() => Promise.resolve({ ...runDetail, run: { ...run1, status: "canceled" } })),
+    approveRun: vi.fn(() => Promise.resolve({ ...runDetail, run: { ...run1, status: "queued" } })),
+    getJobLog: vi.fn(() => Promise.resolve("\x1b[32mok\x1b[0m stored\n")),
+    streamJobLog: vi.fn(
+      streamOf({ type: "attempt", attempt: 1 }, chunk(1, 0, "\x1b[1;31mFAIL\x1b[0m live\n"), { type: "end", status: "failed" }),
     ),
     listTokens: vi.fn(() => Promise.resolve({ items: [] })),
     createToken: vi.fn(() =>

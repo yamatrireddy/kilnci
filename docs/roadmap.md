@@ -49,7 +49,7 @@ Each item crossing a trust boundary (B1, B2, B3, B6) gets an ADR first.
 | 7. Runner agent | `kiln-runner` CLI, identity management, lease loop, log upload, egress-policy acknowledgement | done |
 | 8. GitHub | GitHub App, signature-verified webhook ingest and queue, push/PR triggers, fork detection, manual runs, commit-status outbox | done |
 | 9. Security review | Runner and log-pipeline review findings closed (see the PR that closed them and `docs/threat-model.md`) | done |
-| 10. Runs UI | Runs and jobs pages, sanitizing ANSI log viewer (T-09) | not started |
+| 10. Runs UI | Runs and jobs pages, sanitizing ANSI log viewer (T-09); live tails over SSE on web, stored log re-read on desktop | done |
 | 11. `kiln lint` CLI | `cli/` wrapper over the lint API ([docs/cli.md](cli.md)) | done |
 
 **Exit criteria:** a push to a linked GitHub repository creates a run, jobs execute
@@ -84,3 +84,10 @@ third-party penetration test, stable `/api/v1` contract.
 - Code-split the web bundle (~700 kB); `--embedded` mode becomes meaningful once NATS/object storage exist.
 - Desktop: signed auto-updates with a pinned key (T-37) and the local runner (T-36).
 - `make e2e`: compose-based end-to-end suite (webhook → run → logs) once runs exist.
+
+### Phase 1 follow-ups
+
+- Desktop live log tails: the IPC bridge (`api_request`) buffers whole responses, so the desktop log viewer re-reads the stored log every 5 s while a job runs. Streaming needs a Tauri channel command (security review of `src-tauri`).
+- Log viewer: download the full log (the viewer keeps the last 10 000 lines) and virtualized rendering for very long logs; an incremental stored-log read (`?afterSeq=`) so the desktop fallback stops re-downloading whole logs.
+- Runner masker vs. viewer (runs UI security review): the viewer drops escapes and control characters, so a secret split by them (`sec\x1b[1mret`) passes the masker but displays joined. Mask an escape-stripped view of the stream too, and reset SGR/escape state (`ESC \`, `ESC[0m`) before the runner's own `==>` notes.
+- Confirm with a test that approving a fork run cannot apply to a later push (each run carries one commit SHA; inferred, not yet tested end to end).

@@ -8,6 +8,9 @@
 import createClient, { type Middleware } from "openapi-fetch";
 
 import type { components, paths } from "./gen/schema";
+import { LogStreamError, readLogStream, type LogStreamEvent } from "./logStream";
+
+export { LogStreamError, readLogStream, toLogStreamEvent, type LogStreamEvent, type LogStreamJobStatus } from "./logStream";
 
 export type Schemas = components["schemas"];
 export type Problem = Schemas["Problem"];
@@ -25,6 +28,11 @@ export type APIToken = Schemas["APIToken"];
 export type APITokenCreate = Schemas["APITokenCreate"];
 export type APITokenCreated = Schemas["APITokenCreated"];
 export type Permission = Schemas["Permission"];
+export type Run = Schemas["Run"];
+export type RunStatus = Schemas["RunStatus"];
+export type RunDetail = Schemas["RunDetail"];
+export type Job = Schemas["Job"];
+export type JobStatus = Schemas["JobStatus"];
 export type TokenRequest = Schemas["TokenRequest"];
 export type TokenResponse = Schemas["TokenResponse"];
 export type { components, paths };
@@ -64,12 +72,15 @@ export interface KilnClientOptions {
 export class ApiError extends Error {
   readonly status: number;
   readonly problem: Problem | undefined;
+  /** Seconds the server asked the client to wait (Retry-After), if any. */
+  readonly retryAfter: number | undefined;
 
-  constructor(status: number, problem: Problem | undefined) {
+  constructor(status: number, problem: Problem | undefined, retryAfter?: number) {
     super(problem?.title ?? `Request failed with status ${status}`);
     this.name = "ApiError";
     this.status = status;
     this.problem = problem;
+    this.retryAfter = retryAfter;
   }
 
   /** Field errors for form display, keyed by field name. */
@@ -78,6 +89,13 @@ export class ApiError extends Error {
     for (const e of this.problem?.errors ?? []) out[e.field] = e.message;
     return out;
   }
+}
+
+/** Parses a delta-seconds Retry-After header (HTTP dates are ignored). */
+function retryAfterSeconds(res: Response): number | undefined {
+  const v = res.headers.get("Retry-After");
+  if (v === null || !/^[0-9]{1,6}$/.test(v)) return undefined;
+  return Number(v);
 }
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -209,6 +227,80 @@ export function createKilnClient(opts: KilnClientOptions) {
 
     async listAuditEvents(orgSlug: string, query: PageParams = {}): Promise<Page<AuditEvent>> {
       return unwrap(raw.GET("/api/v1/orgs/{orgSlug}/audit-events", { params: { path: { orgSlug: pathParam(orgSlug) }, query } }));
+    },
+
+    async listRuns(orgSlug: string, projectSlug: string, query: PageParams = {}): Promise<Page<Run>> {
+      return unwrap(
+        raw.GET("/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs", {
+          params: { path: { orgSlug: pathParam(orgSlug), projectSlug: pathParam(projectSlug) }, query },
+        }),
+      );
+    },
+    async getRun(orgSlug: string, projectSlug: string, runId: string): Promise<RunDetail> {
+      return unwrap(
+        raw.GET("/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}", {
+          params: { path: { orgSlug: pathParam(orgSlug), projectSlug: pathParam(projectSlug), runId: pathParam(runId) } },
+        }),
+      );
+    },
+    async cancelRun(orgSlug: string, projectSlug: string, runId: string): Promise<RunDetail> {
+      return unwrap(
+        raw.POST("/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/cancel", {
+          params: { path: { orgSlug: pathParam(orgSlug), projectSlug: pathParam(projectSlug), runId: pathParam(runId) } },
+        }),
+      );
+    },
+    async approveRun(orgSlug: string, projectSlug: string, runId: string): Promise<RunDetail> {
+      return unwrap(
+        raw.POST("/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/approve", {
+          params: { path: { orgSlug: pathParam(orgSlug), projectSlug: pathParam(projectSlug), runId: pathParam(runId) } },
+        }),
+      );
+    },
+
+    /**
+     * A job's stored log (latest attempt) as text. It is untrusted terminal
+     * output: render it only through the sanitizing log viewer.
+     */
+    async getJobLog(orgSlug: string, projectSlug: string, runId: string, jobId: string): Promise<string> {
+      return unwrap(
+        raw.GET("/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs", {
+          params: { path: { orgSlug: pathParam(orgSlug), projectSlug: pathParam(projectSlug), runId: pathParam(runId), jobId: pathParam(jobId) } },
+          parseAs: "text",
+        }),
+      );
+    },
+
+    /**
+     * Follows a job's log as Server-Sent Events (ADR-0007). Pass the last
+     * chunk `id` seen as `lastEventId` to resume after a disconnect. The
+     * generator ends when the server closes the stream (after an `end` event,
+     * or at the server's maximum stream duration); abort `signal` to stop.
+     * Needs a streaming `fetch`; the desktop IPC fetch buffers whole bodies.
+     */
+    async *streamJobLog(
+      orgSlug: string,
+      projectSlug: string,
+      runId: string,
+      jobId: string,
+      opts: { lastEventId?: string; signal?: AbortSignal } = {},
+    ): AsyncGenerator<LogStreamEvent> {
+      const { data, error, response } = await raw.GET("/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs/stream", {
+        params: {
+          path: { orgSlug: pathParam(orgSlug), projectSlug: pathParam(projectSlug), runId: pathParam(runId), jobId: pathParam(jobId) },
+          header: opts.lastEventId ? { "Last-Event-ID": opts.lastEventId } : {},
+        },
+        headers: { Accept: "text/event-stream" },
+        parseAs: "stream",
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      });
+      if (!response.ok) throw new ApiError(response.status, isProblem(error) ? error : undefined, retryAfterSeconds(response));
+      if (!data) return;
+      if (!(response.headers.get("Content-Type") ?? "").startsWith("text/event-stream")) {
+        await data.cancel();
+        throw new LogStreamError("expected an event stream");
+      }
+      yield* readLogStream(data, opts.signal);
     },
 
     async listTokens(): Promise<Page<APIToken>> {

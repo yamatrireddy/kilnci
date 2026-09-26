@@ -2,9 +2,10 @@
 import { formatDateTime } from "@kiln/core";
 import { useParams } from "react-router";
 
-import { EmptyState, QueryState } from "../components/QueryState";
+import { QueryState } from "../components/QueryState";
 import { Breadcrumbs, Card, PageHeader } from "../components/ui";
 import { useProject } from "../queries";
+import { RunsTable } from "./project/RunsTable";
 
 export function ProjectPage() {
   const { orgSlug = "", projectSlug = "" } = useParams();
@@ -32,10 +33,8 @@ export function ProjectPage() {
             }
           />
           <Card className="p-4 sm:p-6">
-            <EmptyState
-              title="No pipelines yet"
-              description="Pipelines and runs arrive in Phase 1. Add a .kiln/pipeline.yaml to your repository to get ready."
-            />
+            <h3 className="mb-3 text-lg text-fg">Runs</h3>
+            <RunsTable orgSlug={orgSlug} projectSlug={p.slug} />
           </Card>
         </div>
       )}
