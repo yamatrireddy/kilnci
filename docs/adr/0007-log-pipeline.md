@@ -25,15 +25,21 @@ Origin, and CSRF model.
 
 1. **Write path (B2).** The runner sends `AppendLogs(job, lease, seq, data)`
    with chunks of at most 256 KiB, already masked. The server checks the
-   lease, then writes the chunk to object storage at
-   `orgs/<org>/runs/<run>/jobs/<job>/<seq, zero-padded>` and records chunk
-   metadata (sequence, size, SHA-256 of the content, object key) — never
-   content — in PostgreSQL. Appends are idempotent per `(job, seq)`: a
+   lease under the job's row lock, in the same transaction as the insert,
+   then writes the chunk to object storage at
+   `orgs/<org>/runs/<run>/jobs/<job>/attempts/<attempt>/<seq, zero-padded>`
+   and records chunk metadata (attempt, sequence, size, SHA-256 of the
+   content, object key, writing runner and lease) — never content — in
+   PostgreSQL. Each lease attempt has its own log: a job re-queued after its
+   lease lapsed starts again at chunk 0, earlier attempts' chunks are kept,
+   and readers see the latest attempt (amended after the Phase 1 security
+   review; chunks were first keyed per job, so a retry collided with the
+   first attempt). Appends are idempotent per `(job, attempt, seq)`: a
    replay with identical content is acknowledged, a replay with different
    content is rejected. Sequence numbers must be contiguous from 0 and at
-   most 16 384 chunks are accepted per job, so tiny chunks cannot exhaust
-   metadata rows or object counts. A per-job cap (default 64 MiB) truncates
-   further output with a marker.
+   most 16 384 chunks are accepted per attempt, so tiny chunks cannot
+   exhaust metadata rows or object counts. A per-attempt cap (default
+   64 MiB) truncates further output with a marker.
 
 2. **Object storage.** `internal/platform/objstore` with two backends:
    `fs` (a directory; the default and the `--embedded` backend, paths built
@@ -58,10 +64,15 @@ Origin, and CSRF model.
    - `GET …/jobs/{jobId}/logs/stream` is a **Server-Sent Events** stream
      (`text/event-stream`) through the normal router: same authentication,
      same resource authorization (`logs:read` on the job's project), same
-     rate limits. It replays stored chunks from `Last-Event-ID`, then follows
-     the bus until the job finishes, and closes after a server-side maximum
-     duration. Each event carries base64 data so arbitrary bytes cannot break
-     SSE framing. Concurrent streams per principal are capped.
+     rate limits. It replays stored chunks after `Last-Event-ID` (event IDs
+     are `<attempt>.<seq>`), then follows the bus until the job finishes, and
+     closes after a server-side maximum duration. An `attempt` event starts
+     each stream and each retry. Each event carries base64 data so arbitrary
+     bytes cannot break SSE framing.
+   - Concurrent streams and downloads are capped per user (across all of the
+     user's sessions and tokens), per org (counted only after
+     authorization, so outsiders cannot use up an org's slots), and in
+     total.
 
 5. **Rendering.** The web client never inserts log bytes as HTML. The
    sanitizing log viewer parses SGR color/style codes into React spans and
@@ -82,10 +93,11 @@ Origin, and CSRF model.
   authenticated principals with `logs:read` on the specific project.
 - *Tampering:* appends are lease-bound and idempotent; chunk keys are built
   from server IDs only, never from runner-supplied paths.
-- *Repudiation:* chunk metadata records the lease and runner.
+- *Repudiation:* chunk metadata records the attempt, lease, and runner.
 - *Information disclosure (A10, T-04):* cross-org reads get 404; logs are
   never in PostgreSQL, traces, or server logs; masking happens on the runner.
-- *Denial of service (T-10):* per-job size cap, chunk size limit, capped
-  concurrent streams and maximum stream duration, per-principal rate limits.
+- *Denial of service (T-10):* per-attempt size cap, chunk size limit,
+  concurrent streams and downloads capped per user, per org, and in total,
+  maximum stream duration, per-principal rate limits.
 - *Elevation of privilege (T-09):* log bytes are data, rendered through the
   sanitizing viewer under a strict CSP; the raw endpoint is `sandbox`ed.
