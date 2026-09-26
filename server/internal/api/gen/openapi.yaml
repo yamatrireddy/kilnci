@@ -29,6 +29,10 @@ tags:
   - name: projects
   - name: tokens
   - name: audit
+  - name: runs
+  - name: pipelines
+  - name: runners
+  - name: vcs
 
 paths:
   /healthz:
@@ -443,6 +447,465 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/Internal" }
 
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+    get:
+      tags: [runs]
+      operationId: listRuns
+      summary: A project's runs, newest first
+      x-kiln-permission: runs:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of runs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+    post:
+      tags: [runs]
+      operationId: createRun
+      summary: Start a run on a branch of the linked repository (developers)
+      description: Retries with the same `Idempotency-Key` return the original run.
+      x-kiln-permission: runs:create
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 255, pattern: "^[A-Za-z0-9._:-]+$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunCreate" }
+      responses:
+        "201":
+          description: Created (or the run for a replayed Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: A run and its jobs
+      x-kiln-permission: runs:read
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+    post:
+      tags: [runs]
+      operationId: cancelRun
+      summary: Cancel a run (developers)
+      description: |
+        Pending and queued jobs are canceled at once; running jobs are asked to
+        stop at their runner's next heartbeat, so the run may stay `running`
+        briefly. Canceling a finished run is a 409. Audited.
+      x-kiln-permission: runs:cancel
+      responses:
+        "200":
+          description: The run after the cancel request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+    post:
+      tags: [runs]
+      operationId: approveRun
+      summary: Approve an untrusted (fork) run so its jobs may start (developers)
+      description: Only runs in `awaiting_approval` can be approved; anything else is a 409. Audited.
+      x-kiln-permission: runs:approve
+      responses:
+        "200":
+          description: The approved run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+      - name: jobId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    get:
+      tags: [runs]
+      operationId: getJobLog
+      summary: A job's stored log (masked by the runner)
+      description: |
+        Raw bytes as the job wrote them (ANSI escapes included). Clients must
+        render them through the sanitizing log viewer, never as HTML. Served
+        with `Content-Security-Policy: sandbox` and `nosniff` (ADR-0007).
+      x-kiln-permission: logs:read
+      responses:
+        "200":
+          description: The log
+          content:
+            text/plain:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs/stream:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+      - name: jobId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    get:
+      tags: [runs]
+      operationId: streamJobLog
+      summary: Live log tail as Server-Sent Events (ADR-0007)
+      description: |
+        Replays stored chunks after `Last-Event-ID`, then follows new ones
+        until the job finishes. `chunk` events carry `{"seq":n,"data":"<base64>"}`;
+        a final `end` event carries `{"status":"<job status>"}`. Streams
+        close after 30 minutes; reconnect with `Last-Event-ID`.
+      x-kiln-permission: logs:read
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: integer, minimum: 0, maximum: 16383 }
+      responses:
+        "200":
+          description: An event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/webhooks/github:
+    post:
+      tags: [vcs]
+      operationId: githubWebhook
+      summary: GitHub App webhook ingest (signature-verified, ADR-0008)
+      description: |
+        Unauthenticated by design (invariant 9): the `X-Hub-Signature-256`
+        HMAC over the raw body is verified before anything is parsed, so the
+        body is not schema-validated here. Replays (same delivery ID or same
+        body) are accepted without effect. Deliveries are processed
+        asynchronously.
+      x-kiln-permission: public
+      security: []
+      parameters:
+        - { name: X-GitHub-Event, in: header, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: X-GitHub-Delivery, in: header, required: true, schema: { type: string, maxLength: 100 } }
+        - { name: X-Hub-Signature-256, in: header, required: true, schema: { type: string, maxLength: 100 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "202": { description: Accepted for processing }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/admin/github-installations:
+    post:
+      tags: [vcs]
+      operationId: bindGitHubInstallation
+      summary: Bind a GitHub App installation to an org (instance admins). Audited.
+      x-kiln-permission: vcs-installations:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitHubInstallationBind" }
+      responses:
+        "201":
+          description: Bound
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitHubInstallation" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/admin/github-installations/{installationId}:
+    parameters:
+      - name: installationId
+        in: path
+        required: true
+        schema: { type: integer, format: int64, minimum: 1 }
+    delete:
+      tags: [vcs]
+      operationId: unbindGitHubInstallation
+      summary: Unbind an installation and remove its repository links (instance admins). Audited.
+      x-kiln-permission: vcs-installations:manage
+      responses:
+        "204": { description: Unbound }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/github-installations:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [vcs]
+      operationId: listGitHubInstallations
+      summary: GitHub installations bound to the org (org admins)
+      x-kiln-permission: vcs-installations:list
+      responses:
+        "200":
+          description: Installations
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitHubInstallationList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/repository:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+    get:
+      tags: [vcs]
+      operationId: getRepository
+      summary: The project's linked repository
+      x-kiln-permission: repository:read
+      responses:
+        "200":
+          description: The link
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repository" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    put:
+      tags: [vcs]
+      operationId: linkRepository
+      summary: Link the project to a repository of one of the org's installations (org admins). Audited.
+      x-kiln-permission: repository:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RepositoryLink" }
+      responses:
+        "200":
+          description: Linked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repository" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    delete:
+      tags: [vcs]
+      operationId: unlinkRepository
+      summary: Remove the project's repository link (org admins). Audited.
+      x-kiln-permission: repository:manage
+      responses:
+        "204": { description: Unlinked }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/pipelines/lint:
+    post:
+      tags: [pipelines]
+      operationId: lintPipeline
+      summary: Validate a pipeline definition without running it
+      description: Uses the same safe loader as run creation (docs/specs/pipeline.md). Reads no tenant data.
+      x-kiln-permission: pipelines:lint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LintRequest" }
+      responses:
+        "200":
+          description: Lint result (an invalid pipeline is still a 200)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LintResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/runners:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [runners]
+      operationId: listRunners
+      summary: The org's runners (org admins)
+      x-kiln-permission: runners:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of runners
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunnerList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/runners/{runnerId}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - name: runnerId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    delete:
+      tags: [runners]
+      operationId: revokeRunner
+      summary: Revoke a runner (org admins); its certificate stops working immediately. Audited.
+      x-kiln-permission: runners:manage
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/runner-registration-tokens:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    post:
+      tags: [runners]
+      operationId: createRunnerRegistrationToken
+      summary: Create a single-use runner registration token (org admins); the secret is returned once
+      description: |
+        The runner exchanges the token and a CSR for its identity over the
+        runner gRPC port (ADR-0005). Labels and trust level are fixed here.
+        At most 20 unused tokens may be active per org. Audited.
+      x-kiln-permission: runners:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunnerRegistrationTokenCreate" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunnerRegistrationTokenCreated" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
   /api/v1/tokens:
     get:
       tags: [tokens]
@@ -530,6 +993,11 @@ components:
       in: path
       required: true
       schema: { $ref: "#/components/schemas/Slug" }
+    RunID:
+      name: runId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
     UserID:
       name: userId
       in: path
@@ -624,7 +1092,11 @@ components:
         - projects:list
         - projects:read
         - audit:read
-      description: Actions an API token may be scoped to (read-only in Phase 0).
+        - runs:list
+        - runs:read
+        - pipelines:lint
+        - logs:read
+      description: Actions an API token may be scoped to (read-only).
 
     Health:
       type: object
@@ -859,3 +1331,216 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/APIToken" }
+
+    RunStatus:
+      type: string
+      enum: [awaiting_approval, queued, running, succeeded, failed, canceled]
+    JobStatus:
+      type: string
+      enum: [pending, queued, running, succeeded, failed, canceled, skipped]
+    Run:
+      type: object
+      additionalProperties: false
+      description: |
+        `title`, `branch`, and `actorLogin` come from the VCS event and are
+        untrusted text (fork PR authors control them); render as text only.
+      required: [id, number, status, event, ref, branch, commitSha, title, isFork, trusted, actorLogin, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        number: { type: integer, format: int64 }
+        status: { $ref: "#/components/schemas/RunStatus" }
+        event: { type: string, enum: [push, pull_request, manual] }
+        ref: { type: string }
+        branch: { type: string }
+        commitSha: { type: string }
+        title: { type: string }
+        prNumber: { type: integer, nullable: true }
+        isFork: { type: boolean }
+        trusted: { type: boolean }
+        actorLogin: { type: string }
+        error: { type: string, description: "Why the run failed before any job ran (e.g. an invalid pipeline)." }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }
+    RunList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Run" }
+        nextCursor: { type: string, nullable: true }
+    JobStep:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string }
+    Job:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, needs, image, labels, steps, attempt, maxAttempts, timeoutSeconds, failureReason]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        needs: { type: array, items: { type: string } }
+        image: { type: string }
+        labels: { type: array, items: { type: string } }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/JobStep" }
+        attempt: { type: integer }
+        maxAttempts: { type: integer }
+        timeoutSeconds: { type: integer }
+        exitCode: { type: integer, nullable: true }
+        failureReason: { type: string }
+        queuedAt: { type: string, format: date-time, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }
+    RunDetail:
+      type: object
+      additionalProperties: false
+      required: [run, jobs]
+      properties:
+        run: { $ref: "#/components/schemas/Run" }
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/Job" }
+    LintRequest:
+      type: object
+      additionalProperties: false
+      required: [pipeline]
+      properties:
+        pipeline:
+          type: string
+          maxLength: 262144
+          description: The contents of .kiln/pipeline.yaml.
+    LintProblem:
+      type: object
+      additionalProperties: false
+      required: [path, line, message]
+      properties:
+        path: { type: string }
+        line: { type: integer }
+        message: { type: string }
+    LintResult:
+      type: object
+      additionalProperties: false
+      required: [valid, problems]
+      properties:
+        valid: { type: boolean }
+        problems:
+          type: array
+          items: { $ref: "#/components/schemas/LintProblem" }
+
+    RunnerLabel:
+      type: string
+      pattern: "^[a-z0-9][a-z0-9._-]{0,62}$"
+    Runner:
+      type: object
+      additionalProperties: false
+      required: [id, name, labels, trusted, version, createdAt, certExpiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        labels: { type: array, items: { $ref: "#/components/schemas/RunnerLabel" } }
+        trusted: { type: boolean }
+        version: { type: string }
+        createdAt: { type: string, format: date-time }
+        certExpiresAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    RunnerList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Runner" }
+        nextCursor: { type: string, nullable: true }
+    RunnerRegistrationTokenCreate:
+      type: object
+      additionalProperties: false
+      required: [labels, trusted, expiresInMinutes]
+      properties:
+        labels:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/RunnerLabel" }
+        trusted:
+          type: boolean
+          description: Trusted runners never run untrusted (fork) jobs and are the only ones that will receive secrets.
+        expiresInMinutes: { type: integer, minimum: 5, maximum: 1440 }
+    RunnerRegistrationToken:
+      type: object
+      additionalProperties: false
+      required: [id, labels, trusted, createdAt, expiresAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        labels: { type: array, items: { $ref: "#/components/schemas/RunnerLabel" } }
+        trusted: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    RunnerRegistrationTokenCreated:
+      type: object
+      additionalProperties: false
+      required: [token, registrationToken]
+      properties:
+        token:
+          type: string
+          description: The secret (kiln_rrt_...). Shown once; single use.
+        registrationToken: { $ref: "#/components/schemas/RunnerRegistrationToken" }
+
+    RunCreate:
+      type: object
+      additionalProperties: false
+      required: [branch]
+      properties:
+        branch: { type: string, minLength: 1, maxLength: 200 }
+    GitHubInstallation:
+      type: object
+      additionalProperties: false
+      required: [installationId, accountLogin, createdAt]
+      properties:
+        installationId: { type: integer, format: int64 }
+        accountLogin: { type: string }
+        createdAt: { type: string, format: date-time }
+        disabledAt: { type: string, format: date-time, nullable: true }
+    GitHubInstallationList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/GitHubInstallation" }
+    GitHubInstallationBind:
+      type: object
+      additionalProperties: false
+      required: [installationId, orgSlug]
+      properties:
+        installationId: { type: integer, format: int64, minimum: 1 }
+        orgSlug: { $ref: "#/components/schemas/Slug" }
+    Repository:
+      type: object
+      additionalProperties: false
+      required: [installationId, repoId, fullName, defaultBranch, private, createdAt]
+      properties:
+        installationId: { type: integer, format: int64 }
+        repoId: { type: integer, format: int64 }
+        fullName: { type: string }
+        defaultBranch: { type: string }
+        private: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        disabledAt: { type: string, format: date-time, nullable: true }
+    RepositoryLink:
+      type: object
+      additionalProperties: false
+      required: [installationId, fullName]
+      properties:
+        installationId: { type: integer, format: int64, minimum: 1 }
+        fullName: { type: string, minLength: 3, maxLength: 140, pattern: "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$" }

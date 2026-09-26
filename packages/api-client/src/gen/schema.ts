@@ -268,6 +268,340 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        /** A project's runs, newest first */
+        get: operations["listRuns"];
+        put?: never;
+        /**
+         * Start a run on a branch of the linked repository (developers)
+         * @description Retries with the same `Idempotency-Key` return the original run.
+         */
+        post: operations["createRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        /** A run and its jobs */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a run (developers)
+         * @description Pending and queued jobs are canceled at once; running jobs are asked to
+         *     stop at their runner's next heartbeat, so the run may stay `running`
+         *     briefly. Canceling a finished run is a 409. Audited.
+         */
+        post: operations["cancelRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve an untrusted (fork) run so its jobs may start (developers)
+         * @description Only runs in `awaiting_approval` can be approved; anything else is a 409. Audited.
+         */
+        post: operations["approveRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A job's stored log (masked by the runner)
+         * @description Raw bytes as the job wrote them (ANSI escapes included). Clients must
+         *     render them through the sanitizing log viewer, never as HTML. Served
+         *     with `Content-Security-Policy: sandbox` and `nosniff` (ADR-0007).
+         */
+        get: operations["getJobLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Live log tail as Server-Sent Events (ADR-0007)
+         * @description Replays stored chunks after `Last-Event-ID`, then follows new ones
+         *     until the job finishes. `chunk` events carry `{"seq":n,"data":"<base64>"}`;
+         *     a final `end` event carries `{"status":"<job status>"}`. Streams
+         *     close after 30 minutes; reconnect with `Last-Event-ID`.
+         */
+        get: operations["streamJobLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * GitHub App webhook ingest (signature-verified, ADR-0008)
+         * @description Unauthenticated by design (invariant 9): the `X-Hub-Signature-256`
+         *     HMAC over the raw body is verified before anything is parsed, so the
+         *     body is not schema-validated here. Replays (same delivery ID or same
+         *     body) are accepted without effect. Deliveries are processed
+         *     asynchronously.
+         */
+        post: operations["githubWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/github-installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind a GitHub App installation to an org (instance admins). Audited. */
+        post: operations["bindGitHubInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/github-installations/{installationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installationId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unbind an installation and remove its repository links (instance admins). Audited. */
+        delete: operations["unbindGitHubInstallation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/github-installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        /** GitHub installations bound to the org (org admins) */
+        get: operations["listGitHubInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/repository": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        /** The project's linked repository */
+        get: operations["getRepository"];
+        /** Link the project to a repository of one of the org's installations (org admins). Audited. */
+        put: operations["linkRepository"];
+        post?: never;
+        /** Remove the project's repository link (org admins). Audited. */
+        delete: operations["unlinkRepository"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipelines/lint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a pipeline definition without running it
+         * @description Uses the same safe loader as run creation (docs/specs/pipeline.md). Reads no tenant data.
+         */
+        post: operations["lintPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/runners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        /** The org's runners (org admins) */
+        get: operations["listRunners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/runners/{runnerId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                runnerId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a runner (org admins); its certificate stops working immediately. Audited. */
+        delete: operations["revokeRunner"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/runner-registration-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a single-use runner registration token (org admins); the secret is returned once
+         * @description The runner exchanges the token and a CSR for its identity over the
+         *     runner gRPC port (ADR-0005). Labels and trust level are fixed here.
+         *     At most 20 unused tokens may be active per org. Audited.
+         */
+        post: operations["createRunnerRegistrationToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tokens": {
         parameters: {
             query?: never;
@@ -319,10 +653,10 @@ export interface components {
         /** @enum {string} */
         Role: "viewer" | "developer" | "admin" | "owner";
         /**
-         * @description Actions an API token may be scoped to (read-only in Phase 0).
+         * @description Actions an API token may be scoped to (read-only).
          * @enum {string}
          */
-        Permission: "session:read" | "orgs:list" | "orgs:read" | "members:list" | "projects:list" | "projects:read" | "audit:read";
+        Permission: "session:read" | "orgs:list" | "orgs:read" | "members:list" | "projects:list" | "projects:read" | "audit:read" | "runs:list" | "runs:read" | "pipelines:lint" | "logs:read";
         Health: {
             /** @enum {string} */
             status: "ok";
@@ -473,6 +807,160 @@ export interface components {
         APITokenList: {
             items: components["schemas"]["APIToken"][];
         };
+        /** @enum {string} */
+        RunStatus: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "canceled";
+        /** @enum {string} */
+        JobStatus: "pending" | "queued" | "running" | "succeeded" | "failed" | "canceled" | "skipped";
+        /**
+         * @description `title`, `branch`, and `actorLogin` come from the VCS event and are
+         *     untrusted text (fork PR authors control them); render as text only.
+         */
+        Run: {
+            id: components["schemas"]["ID"];
+            /** Format: int64 */
+            number: number;
+            status: components["schemas"]["RunStatus"];
+            /** @enum {string} */
+            event: "push" | "pull_request" | "manual";
+            ref: string;
+            branch: string;
+            commitSha: string;
+            title: string;
+            prNumber?: number | null;
+            isFork: boolean;
+            trusted: boolean;
+            actorLogin: string;
+            /** @description Why the run failed before any job ran (e.g. an invalid pipeline). */
+            error?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+        };
+        RunList: {
+            items: components["schemas"]["Run"][];
+            nextCursor?: string | null;
+        };
+        JobStep: {
+            name: string;
+        };
+        Job: {
+            id: components["schemas"]["ID"];
+            name: string;
+            status: components["schemas"]["JobStatus"];
+            needs: string[];
+            image: string;
+            labels: string[];
+            steps: components["schemas"]["JobStep"][];
+            attempt: number;
+            maxAttempts: number;
+            timeoutSeconds: number;
+            exitCode?: number | null;
+            failureReason: string;
+            /** Format: date-time */
+            queuedAt?: string | null;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+        };
+        RunDetail: {
+            run: components["schemas"]["Run"];
+            jobs: components["schemas"]["Job"][];
+        };
+        LintRequest: {
+            /** @description The contents of .kiln/pipeline.yaml. */
+            pipeline: string;
+        };
+        LintProblem: {
+            path: string;
+            line: number;
+            message: string;
+        };
+        LintResult: {
+            valid: boolean;
+            problems: components["schemas"]["LintProblem"][];
+        };
+        RunnerLabel: string;
+        Runner: {
+            id: components["schemas"]["ID"];
+            name: string;
+            labels: components["schemas"]["RunnerLabel"][];
+            trusted: boolean;
+            version: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            certExpiresAt: string;
+            /** Format: date-time */
+            lastSeenAt?: string | null;
+            /** Format: date-time */
+            revokedAt?: string | null;
+        };
+        RunnerList: {
+            items: components["schemas"]["Runner"][];
+            nextCursor?: string | null;
+        };
+        RunnerRegistrationTokenCreate: {
+            labels: components["schemas"]["RunnerLabel"][];
+            /** @description Trusted runners never run untrusted (fork) jobs and are the only ones that will receive secrets. */
+            trusted: boolean;
+            expiresInMinutes: number;
+        };
+        RunnerRegistrationToken: {
+            id: components["schemas"]["ID"];
+            labels: components["schemas"]["RunnerLabel"][];
+            trusted: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        RunnerRegistrationTokenCreated: {
+            /** @description The secret (kiln_rrt_...). Shown once; single use. */
+            token: string;
+            registrationToken: components["schemas"]["RunnerRegistrationToken"];
+        };
+        RunCreate: {
+            branch: string;
+        };
+        GitHubInstallation: {
+            /** Format: int64 */
+            installationId: number;
+            accountLogin: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            disabledAt?: string | null;
+        };
+        GitHubInstallationList: {
+            items: components["schemas"]["GitHubInstallation"][];
+        };
+        GitHubInstallationBind: {
+            /** Format: int64 */
+            installationId: number;
+            orgSlug: components["schemas"]["Slug"];
+        };
+        Repository: {
+            /** Format: int64 */
+            installationId: number;
+            /** Format: int64 */
+            repoId: number;
+            fullName: string;
+            defaultBranch: string;
+            private: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            disabledAt?: string | null;
+        };
+        RepositoryLink: {
+            /** Format: int64 */
+            installationId: number;
+            fullName: string;
+        };
     };
     responses: {
         /** @description Redirect */
@@ -560,6 +1048,7 @@ export interface components {
     parameters: {
         OrgSlug: components["schemas"]["Slug"];
         ProjectSlug: components["schemas"]["Slug"];
+        RunID: components["schemas"]["ID"];
         UserID: components["schemas"]["ID"];
         /** @description Opaque cursor from a previous page's `nextCursor`. */
         Cursor: string;
@@ -1082,6 +1571,564 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    listRuns: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    createRun: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCreate"];
+            };
+        };
+        responses: {
+            /** @description Created (or the run for a replayed Idempotency-Key) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    cancelRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run after the cancel request */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    approveRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The approved run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    getJobLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The log */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    streamJobLog: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Last-Event-ID"?: number;
+            };
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    githubWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-GitHub-Event": string;
+                "X-GitHub-Delivery": string;
+                "X-Hub-Signature-256": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Accepted for processing */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    bindGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitHubInstallationBind"];
+            };
+        };
+        responses: {
+            /** @description Bound */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallation"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    unbindGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unbound */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    listGitHubInstallations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallationList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    getRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Repository"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    linkRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepositoryLink"];
+            };
+        };
+        responses: {
+            /** @description Linked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Repository"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    unlinkRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unlinked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    lintPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LintRequest"];
+            };
+        };
+        responses: {
+            /** @description Lint result (an invalid pipeline is still a 200) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LintResult"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    listRunners: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of runners */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    revokeRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                runnerId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    createRunnerRegistrationToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunnerRegistrationTokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerRegistrationTokenCreated"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["Validation"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["Internal"];

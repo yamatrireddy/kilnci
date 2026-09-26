@@ -27,6 +27,25 @@ const (
 
 	ActionAuditRead Action = "audit:read"
 
+	ActionRunsList    Action = "runs:list"
+	ActionRunsRead    Action = "runs:read"
+	ActionRunsCreate  Action = "runs:create"
+	ActionRunsCancel  Action = "runs:cancel"
+	ActionRunsApprove Action = "runs:approve"
+
+	ActionLogsRead Action = "logs:read"
+
+	ActionPipelinesLint Action = "pipelines:lint"
+
+	ActionRunnersList   Action = "runners:list"
+	ActionRunnersManage Action = "runners:manage"
+
+	ActionRepositoryRead   Action = "repository:read"
+	ActionRepositoryManage Action = "repository:manage"
+
+	ActionVCSInstallationsList   Action = "vcs-installations:list"
+	ActionVCSInstallationsManage Action = "vcs-installations:manage"
+
 	ActionTokensList   Action = "tokens:list"
 	ActionTokensCreate Action = "tokens:create"
 	ActionTokensDelete Action = "tokens:delete"
@@ -69,6 +88,30 @@ var policy = map[Action]rule{
 	ActionProjectsRead:   {minRole: domain.RoleViewer},
 
 	ActionAuditRead: {minRole: domain.RoleAdmin},
+
+	ActionRunsList:   {minRole: domain.RoleViewer},
+	ActionRunsRead:   {minRole: domain.RoleViewer},
+	ActionRunsCreate: {minRole: domain.RoleDeveloper},
+	ActionRunsCancel: {minRole: domain.RoleDeveloper},
+	// Approving runs untrusted (fork) code on the org's runners (ADR-0008 §5).
+	ActionRunsApprove: {minRole: domain.RoleDeveloper},
+
+	// Logs can contain leaked secrets despite masking (A10); same audience
+	// as the run itself.
+	ActionLogsRead: {minRole: domain.RoleViewer},
+
+	ActionPipelinesLint: {selfOnly: true}, // reads no tenant data
+
+	ActionRunnersList:   {minRole: domain.RoleAdmin},
+	ActionRunnersManage: {minRole: domain.RoleAdmin},
+
+	ActionRepositoryRead:   {minRole: domain.RoleViewer},
+	ActionRepositoryManage: {minRole: domain.RoleAdmin},
+
+	ActionVCSInstallationsList: {minRole: domain.RoleAdmin},
+	// Binding a GitHub installation to an org decides which tenant may use
+	// its repositories (ADR-0008 §2): instance admins only.
+	ActionVCSInstallationsManage: {instanceAdmin: true},
 
 	ActionTokensList:   {selfOnly: true},
 	ActionTokensCreate: {selfOnly: true},

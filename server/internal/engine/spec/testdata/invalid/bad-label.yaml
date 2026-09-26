@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: runner label
+version: 1
+jobs:
+  a:
+    image: alpine:3.22
+    runs-on: ["trusted pool"]
+    steps: [{run: x}]

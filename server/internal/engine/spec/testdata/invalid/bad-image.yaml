@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: must be a container image reference
+version: 1
+jobs:
+  a:
+    image: "alpine; rm -rf /"
+    steps: [{run: x}]

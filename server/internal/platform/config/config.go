@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +58,10 @@ type Config struct {
 	Auth     Auth
 	Web      Web
 	Tracing  Tracing
+	Runner   Runner
+	Logs     Logs
+	NATS     NATS
+	GitHub   GitHub
 }
 
 // HTTP configures the listener and HTTP behavior.
@@ -131,6 +136,64 @@ type Web struct {
 	Dir string
 }
 
+// Runner configures the runner gRPC listener (ADR-0005).
+type Runner struct {
+	// Addr is the gRPC listen address (default ":9443").
+	Addr string
+	// CADir holds the runner CA (ca.crt, ca.key). Empty disables the
+	// runner listener.
+	CADir string
+	// Hostnames the runner server certificate is issued for.
+	Hostnames []string
+}
+
+// Enabled reports whether the runner listener is configured.
+func (r Runner) Enabled() bool { return r.CADir != "" }
+
+// Logs configures job log storage (ADR-0007).
+type Logs struct {
+	// Store is "fs" (a local directory) or "s3".
+	Store string
+	// Dir is the fs store's directory.
+	Dir      string
+	MaxBytes int64
+	S3       S3
+}
+
+// S3 configures an S3-compatible bucket.
+type S3 struct {
+	Endpoint  string
+	Bucket    string
+	Region    string
+	Prefix    string
+	AccessKey string
+	SecretKey Secret
+	UseTLS    bool
+}
+
+// NATS configures the live notification bus. Empty URL uses an in-process
+// bus (single replica or --embedded).
+type NATS struct {
+	URL       string
+	CredsFile string
+	User      string
+	Password  Secret
+	// Insecure disables TLS (development only).
+	Insecure bool
+}
+
+// GitHub configures the GitHub App (ADR-0008). Empty AppID disables it.
+type GitHub struct {
+	AppID int64
+	// PrivateKey is the App's PEM private key (from KILN_GITHUB_APP_PRIVATE_KEY_FILE).
+	PrivateKey    Secret
+	WebhookSecret Secret
+	APIURL        string
+}
+
+// Enabled reports whether the GitHub App is configured.
+func (g GitHub) Enabled() bool { return g.AppID > 0 }
+
 // Tracing configures OpenTelemetry export.
 type Tracing struct {
 	// OTLPEndpoint (host:port) enables OTLP/HTTP trace export when set.
@@ -198,6 +261,36 @@ func Load(src Source, embedded bool) (*Config, error) {
 	c.Auth.BootstrapAdminEmails = lower(p.list("KILN_AUTH_BOOTSTRAP_ADMIN_EMAILS"))
 
 	c.Web.Dir = p.str("KILN_WEB_DIR", "")
+
+	c.Runner.Addr = p.str("KILN_RUNNER_ADDR", ":9443")
+	c.Runner.CADir = p.str("KILN_RUNNER_CA_DIR", "")
+	c.Runner.Hostnames = lower(p.list("KILN_RUNNER_HOSTNAMES"))
+
+	c.Logs.Store = p.str("KILN_LOG_STORE", "fs")
+	defaultLogDir := ""
+	if isDev {
+		defaultLogDir = "data/logs"
+	}
+	c.Logs.Dir = p.str("KILN_LOG_DIR", defaultLogDir)
+	c.Logs.MaxBytes = p.int64("KILN_LOG_MAX_BYTES", 64<<20)
+	c.Logs.S3.Endpoint = p.str("KILN_S3_ENDPOINT", "")
+	c.Logs.S3.Bucket = p.str("KILN_S3_BUCKET", "")
+	c.Logs.S3.Region = p.str("KILN_S3_REGION", "")
+	c.Logs.S3.Prefix = p.str("KILN_S3_PREFIX", "")
+	c.Logs.S3.AccessKey = p.str("KILN_S3_ACCESS_KEY_ID", "")
+	c.Logs.S3.SecretKey = p.secret("KILN_S3_SECRET_ACCESS_KEY")
+	c.Logs.S3.UseTLS = p.bool("KILN_S3_USE_TLS", true)
+
+	c.NATS.URL = p.str("KILN_NATS_URL", "")
+	c.NATS.CredsFile = p.str("KILN_NATS_CREDS_FILE", "")
+	c.NATS.User = p.str("KILN_NATS_USER", "")
+	c.NATS.Password = p.secret("KILN_NATS_PASSWORD")
+	c.NATS.Insecure = p.bool("KILN_NATS_INSECURE", false)
+
+	c.GitHub.AppID = p.int64("KILN_GITHUB_APP_ID", 0)
+	c.GitHub.PrivateKey = p.secretFile("KILN_GITHUB_APP_PRIVATE_KEY_FILE")
+	c.GitHub.WebhookSecret = p.secret("KILN_GITHUB_WEBHOOK_SECRET")
+	c.GitHub.APIURL = p.str("KILN_GITHUB_API_URL", "https://api.github.com")
 
 	c.Tracing.OTLPEndpoint = p.str("KILN_OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	c.Tracing.Insecure = p.bool("KILN_OTEL_EXPORTER_OTLP_INSECURE", false)
@@ -308,8 +401,69 @@ func (c *Config) validate() []error {
 	if c.Auth.DesktopRefreshTokenTTL <= 0 || c.Auth.DesktopRefreshTokenTTL > 90*24*time.Hour {
 		add("KILN_DESKTOP_REFRESH_TOKEN_TTL must be between 1s and 2160h")
 	}
+
+	switch c.Logs.Store {
+	case "fs":
+		if c.Logs.Dir == "" {
+			add("KILN_LOG_DIR is required when KILN_LOG_STORE=fs (a directory outside the database host's backups is recommended)")
+		}
+	case "s3":
+		if c.Logs.S3.Endpoint == "" || c.Logs.S3.Bucket == "" || c.Logs.S3.AccessKey == "" || c.Logs.S3.SecretKey.IsZero() {
+			add("KILN_S3_ENDPOINT, KILN_S3_BUCKET, KILN_S3_ACCESS_KEY_ID and KILN_S3_SECRET_ACCESS_KEY are required when KILN_LOG_STORE=s3")
+		}
+		if strings.Contains(c.Logs.S3.Endpoint, "/") {
+			add("KILN_S3_ENDPOINT must be host[:port] without a scheme")
+		}
+		if !c.Logs.S3.UseTLS && !c.IsDevelopment() {
+			add("KILN_S3_USE_TLS=false is allowed only with KILN_ENV=development")
+		}
+	default:
+		add("KILN_LOG_STORE must be fs or s3")
+	}
+	if c.Logs.MaxBytes < 1<<20 || c.Logs.MaxBytes > 1<<30 {
+		add("KILN_LOG_MAX_BYTES must be between 1 MiB and 1 GiB")
+	}
+	if c.NATS.URL != "" {
+		if u, err := url.Parse(c.NATS.URL); err != nil || (u.Scheme != "nats" && u.Scheme != "tls") || u.User != nil {
+			add("KILN_NATS_URL must be nats:// or tls:// without credentials (use KILN_NATS_CREDS_FILE or KILN_NATS_USER/PASSWORD)")
+		}
+		if c.NATS.Insecure && !c.IsDevelopment() {
+			add("KILN_NATS_INSECURE is allowed only with KILN_ENV=development")
+		}
+	}
+
+	if c.GitHub.AppID < 0 {
+		add("KILN_GITHUB_APP_ID must be a positive integer")
+	}
+	if c.GitHub.Enabled() {
+		if c.GitHub.PrivateKey.IsZero() {
+			add("KILN_GITHUB_APP_PRIVATE_KEY_FILE is required when KILN_GITHUB_APP_ID is set")
+		}
+		if len(c.GitHub.WebhookSecret.Reveal()) < 20 {
+			add("KILN_GITHUB_WEBHOOK_SECRET (or _FILE) of at least 20 characters is required when KILN_GITHUB_APP_ID is set")
+		}
+		if u, err := url.Parse(c.GitHub.APIURL); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+			add("KILN_GITHUB_API_URL must be an https URL")
+		}
+	}
+
+	if c.Runner.Enabled() {
+		if len(c.Runner.Hostnames) == 0 {
+			add("KILN_RUNNER_HOSTNAMES is required when KILN_RUNNER_CA_DIR is set (names runners use to reach this server)")
+		}
+		for _, h := range c.Runner.Hostnames {
+			if net.ParseIP(h) == nil && !hostnamePattern.MatchString(h) {
+				add("KILN_RUNNER_HOSTNAMES: %q is not a hostname or IP address", h)
+			}
+		}
+		if _, _, err := net.SplitHostPort(c.Runner.Addr); err != nil {
+			add("KILN_RUNNER_ADDR must be host:port")
+		}
+	}
 	return errs
 }
+
+var hostnamePattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func isLoopbackHost(h string) bool {
 	if h == "localhost" {
@@ -372,6 +526,21 @@ func (p *parser) secret(key string) Secret {
 		return NewSecret(v)
 	}
 	return Secret{}
+}
+
+// secretFile reads a secret that is only accepted from a file (e.g. a
+// private key), never from the environment directly.
+func (p *parser) secretFile(key string) Secret {
+	path, ok := p.get(key)
+	if !ok {
+		return Secret{}
+	}
+	b, err := p.src.ReadFile(path)
+	if err != nil {
+		p.errs = append(p.errs, fmt.Errorf("%s: cannot read file", key))
+		return Secret{}
+	}
+	return NewSecret(string(b))
 }
 
 func (p *parser) url(key string) *url.URL {

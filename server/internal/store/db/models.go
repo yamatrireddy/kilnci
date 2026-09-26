@@ -43,6 +43,23 @@ type AuditEvent struct {
 	Hash       []byte
 }
 
+type CommitStatusOutbox struct {
+	ID             string
+	OrgID          string
+	RunID          string
+	RepoID         int64
+	InstallationID int64
+	CommitSha      string
+	State          string
+	Context        string
+	Description    string
+	TargetUrl      string
+	CreatedAt      time.Time
+	Attempts       int32
+	NextAttemptAt  time.Time
+	SentAt         *time.Time
+}
+
 type DesktopAccessToken struct {
 	TokenHash []byte
 	GrantID   string
@@ -74,6 +91,54 @@ type DesktopRefreshToken struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time
 	UsedAt    *time.Time
+}
+
+type GithubInstallation struct {
+	InstallationID int64
+	OrgID          string
+	AccountLogin   string
+	BoundBy        *string
+	CreatedAt      time.Time
+	DisabledAt     *time.Time
+}
+
+type Job struct {
+	ID              string
+	OrgID           string
+	RunID           string
+	Name            string
+	Status          string
+	Needs           []string
+	Image           string
+	Labels          []string
+	Steps           []byte
+	Env             []byte
+	TimeoutSeconds  int32
+	Attempt         int32
+	MaxAttempts     int32
+	Trusted         bool
+	RunnerID        *string
+	LeaseID         []byte
+	LeaseExpiresAt  *time.Time
+	CancelRequested bool
+	ExitCode        *int32
+	FailureReason   string
+	CreatedAt       time.Time
+	QueuedAt        *time.Time
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	LogBytes        int64
+	LogTruncated    bool
+}
+
+type JobLogChunk struct {
+	OrgID     string
+	JobID     string
+	Seq       int32
+	Size      int32
+	Sha256    []byte
+	ObjectKey string
+	CreatedAt time.Time
 }
 
 type LoginState struct {
@@ -111,6 +176,83 @@ type Project struct {
 	CreatedAt time.Time
 }
 
+type ProjectRunCounter struct {
+	ProjectID  string
+	OrgID      string
+	LastNumber int64
+}
+
+type Repository struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	InstallationID int64
+	RepoID         int64
+	FullName       string
+	CloneUrl       string
+	DefaultBranch  string
+	Private        bool
+	LinkedBy       *string
+	CreatedAt      time.Time
+	DisabledAt     *time.Time
+}
+
+type Run struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	Number         int64
+	Status         string
+	Event          string
+	Ref            string
+	Branch         string
+	CommitSha      string
+	Title          string
+	PrNumber       int32
+	IsFork         bool
+	Trusted        bool
+	ActorLogin     string
+	CreatedBy      *string
+	IdempotencyKey *string
+	Error          string
+	CreatedAt      time.Time
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+}
+
+type Runner struct {
+	ID             string
+	OrgID          string
+	Name           string
+	Labels         []string
+	Trusted        bool
+	Version        string
+	Capacity       int32
+	CertSerial     string
+	CertDer        []byte
+	CertSpkiSha256 []byte
+	PrevCertSerial *string
+	CertRenewedAt  time.Time
+	CertExpiresAt  time.Time
+	CreatedBy      *string
+	CreatedAt      time.Time
+	LastSeenAt     *time.Time
+	RevokedAt      *time.Time
+}
+
+type RunnerRegistrationToken struct {
+	ID        string
+	OrgID     string
+	TokenHash []byte
+	Labels    []string
+	Trusted   bool
+	CreatedBy *string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	RunnerID  *string
+}
+
 type User struct {
 	ID            string
 	OidcIssuer    *string
@@ -129,4 +271,18 @@ type WebSession struct {
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
 	RevokedAt  *time.Time
+}
+
+type WebhookDelivery struct {
+	ID            string
+	DeliveryID    string
+	BodySha256    []byte
+	Event         string
+	Payload       []byte
+	ReceivedAt    time.Time
+	Status        string
+	Attempts      int32
+	NextAttemptAt time.Time
+	ProcessedAt   *time.Time
+	Outcome       string
 }

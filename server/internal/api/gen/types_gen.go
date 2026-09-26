@@ -42,15 +42,52 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for JobStatus.
+const (
+	JobStatusCanceled  JobStatus = "canceled"
+	JobStatusFailed    JobStatus = "failed"
+	JobStatusPending   JobStatus = "pending"
+	JobStatusQueued    JobStatus = "queued"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusSkipped   JobStatus = "skipped"
+	JobStatusSucceeded JobStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the JobStatus enum.
+func (e JobStatus) Valid() bool {
+	switch e {
+	case JobStatusCanceled:
+		return true
+	case JobStatusFailed:
+		return true
+	case JobStatusPending:
+		return true
+	case JobStatusQueued:
+		return true
+	case JobStatusRunning:
+		return true
+	case JobStatusSkipped:
+		return true
+	case JobStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Permission.
 const (
-	AuditRead    Permission = "audit:read"
-	MembersList  Permission = "members:list"
-	OrgsList     Permission = "orgs:list"
-	OrgsRead     Permission = "orgs:read"
-	ProjectsList Permission = "projects:list"
-	ProjectsRead Permission = "projects:read"
-	SessionRead  Permission = "session:read"
+	AuditRead     Permission = "audit:read"
+	LogsRead      Permission = "logs:read"
+	MembersList   Permission = "members:list"
+	OrgsList      Permission = "orgs:list"
+	OrgsRead      Permission = "orgs:read"
+	PipelinesLint Permission = "pipelines:lint"
+	ProjectsList  Permission = "projects:list"
+	ProjectsRead  Permission = "projects:read"
+	RunsList      Permission = "runs:list"
+	RunsRead      Permission = "runs:read"
+	SessionRead   Permission = "session:read"
 )
 
 // Valid indicates whether the value is a known member of the Permission enum.
@@ -58,15 +95,23 @@ func (e Permission) Valid() bool {
 	switch e {
 	case AuditRead:
 		return true
+	case LogsRead:
+		return true
 	case MembersList:
 		return true
 	case OrgsList:
 		return true
 	case OrgsRead:
 		return true
+	case PipelinesLint:
+		return true
 	case ProjectsList:
 		return true
 	case ProjectsRead:
+		return true
+	case RunsList:
+		return true
+	case RunsRead:
 		return true
 	case SessionRead:
 		return true
@@ -129,6 +174,57 @@ func (e Role) Valid() bool {
 	case Owner:
 		return true
 	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunEvent.
+const (
+	Manual      RunEvent = "manual"
+	PullRequest RunEvent = "pull_request"
+	Push        RunEvent = "push"
+)
+
+// Valid indicates whether the value is a known member of the RunEvent enum.
+func (e RunEvent) Valid() bool {
+	switch e {
+	case Manual:
+		return true
+	case PullRequest:
+		return true
+	case Push:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunStatus.
+const (
+	RunStatusAwaitingApproval RunStatus = "awaiting_approval"
+	RunStatusCanceled         RunStatus = "canceled"
+	RunStatusFailed           RunStatus = "failed"
+	RunStatusQueued           RunStatus = "queued"
+	RunStatusRunning          RunStatus = "running"
+	RunStatusSucceeded        RunStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the RunStatus enum.
+func (e RunStatus) Valid() bool {
+	switch e {
+	case RunStatusAwaitingApproval:
+		return true
+	case RunStatusCanceled:
+		return true
+	case RunStatusFailed:
+		return true
+	case RunStatusQueued:
+		return true
+	case RunStatusRunning:
+		return true
+	case RunStatusSucceeded:
 		return true
 	default:
 		return false
@@ -271,6 +367,25 @@ type FieldError struct {
 	Message string `json:"message"`
 }
 
+// GitHubInstallation defines model for GitHubInstallation.
+type GitHubInstallation struct {
+	AccountLogin   string     `json:"accountLogin"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	DisabledAt     *time.Time `json:"disabledAt,omitempty"`
+	InstallationId int64      `json:"installationId"`
+}
+
+// GitHubInstallationBind defines model for GitHubInstallationBind.
+type GitHubInstallationBind struct {
+	InstallationId int64 `json:"installationId"`
+	OrgSlug        Slug  `json:"orgSlug"`
+}
+
+// GitHubInstallationList defines model for GitHubInstallationList.
+type GitHubInstallationList struct {
+	Items []GitHubInstallation `json:"items"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -281,6 +396,54 @@ type HealthStatus string
 
 // ID Opaque ULID.
 type ID = string
+
+// Job defines model for Job.
+type Job struct {
+	Attempt       int        `json:"attempt"`
+	ExitCode      *int       `json:"exitCode,omitempty"`
+	FailureReason string     `json:"failureReason"`
+	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
+
+	// Id Opaque ULID.
+	Id             ID         `json:"id"`
+	Image          string     `json:"image"`
+	Labels         []string   `json:"labels"`
+	MaxAttempts    int        `json:"maxAttempts"`
+	Name           string     `json:"name"`
+	Needs          []string   `json:"needs"`
+	QueuedAt       *time.Time `json:"queuedAt,omitempty"`
+	StartedAt      *time.Time `json:"startedAt,omitempty"`
+	Status         JobStatus  `json:"status"`
+	Steps          []JobStep  `json:"steps"`
+	TimeoutSeconds int        `json:"timeoutSeconds"`
+}
+
+// JobStatus defines model for JobStatus.
+type JobStatus string
+
+// JobStep defines model for JobStep.
+type JobStep struct {
+	Name string `json:"name"`
+}
+
+// LintProblem defines model for LintProblem.
+type LintProblem struct {
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+	Path    string `json:"path"`
+}
+
+// LintRequest defines model for LintRequest.
+type LintRequest struct {
+	// Pipeline The contents of .kiln/pipeline.yaml.
+	Pipeline string `json:"pipeline"`
+}
+
+// LintResult defines model for LintResult.
+type LintResult struct {
+	Problems []LintProblem `json:"problems"`
+	Valid    bool          `json:"valid"`
+}
 
 // Member defines model for Member.
 type Member struct {
@@ -335,7 +498,7 @@ type OrgList struct {
 	NextCursor *string `json:"nextCursor,omitempty"`
 }
 
-// Permission Actions an API token may be scoped to (read-only in Phase 0).
+// Permission Actions an API token may be scoped to (read-only).
 type Permission string
 
 // Problem RFC 9457 problem details.
@@ -382,8 +545,128 @@ type ReadinessChecks string
 // ReadinessStatus defines model for Readiness.Status.
 type ReadinessStatus string
 
+// Repository defines model for Repository.
+type Repository struct {
+	CreatedAt      time.Time  `json:"createdAt"`
+	DefaultBranch  string     `json:"defaultBranch"`
+	DisabledAt     *time.Time `json:"disabledAt,omitempty"`
+	FullName       string     `json:"fullName"`
+	InstallationId int64      `json:"installationId"`
+	Private        bool       `json:"private"`
+	RepoId         int64      `json:"repoId"`
+}
+
+// RepositoryLink defines model for RepositoryLink.
+type RepositoryLink struct {
+	FullName       string `json:"fullName"`
+	InstallationId int64  `json:"installationId"`
+}
+
 // Role defines model for Role.
 type Role string
+
+// Run `title`, `branch`, and `actorLogin` come from the VCS event and are
+// untrusted text (fork PR authors control them); render as text only.
+type Run struct {
+	ActorLogin string    `json:"actorLogin"`
+	Branch     string    `json:"branch"`
+	CommitSha  string    `json:"commitSha"`
+	CreatedAt  time.Time `json:"createdAt"`
+
+	// Error Why the run failed before any job ran (e.g. an invalid pipeline).
+	Error      *string    `json:"error,omitempty"`
+	Event      RunEvent   `json:"event"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+
+	// Id Opaque ULID.
+	Id        ID         `json:"id"`
+	IsFork    bool       `json:"isFork"`
+	Number    int64      `json:"number"`
+	PrNumber  *int       `json:"prNumber,omitempty"`
+	Ref       string     `json:"ref"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	Status    RunStatus  `json:"status"`
+	Title     string     `json:"title"`
+	Trusted   bool       `json:"trusted"`
+}
+
+// RunEvent defines model for Run.Event.
+type RunEvent string
+
+// RunCreate defines model for RunCreate.
+type RunCreate struct {
+	Branch string `json:"branch"`
+}
+
+// RunDetail defines model for RunDetail.
+type RunDetail struct {
+	Jobs []Job `json:"jobs"`
+
+	// Run `title`, `branch`, and `actorLogin` come from the VCS event and are
+	// untrusted text (fork PR authors control them); render as text only.
+	Run Run `json:"run"`
+}
+
+// RunList defines model for RunList.
+type RunList struct {
+	Items      []Run   `json:"items"`
+	NextCursor *string `json:"nextCursor,omitempty"`
+}
+
+// RunStatus defines model for RunStatus.
+type RunStatus string
+
+// Runner defines model for Runner.
+type Runner struct {
+	CertExpiresAt time.Time `json:"certExpiresAt"`
+	CreatedAt     time.Time `json:"createdAt"`
+
+	// Id Opaque ULID.
+	Id         ID            `json:"id"`
+	Labels     []RunnerLabel `json:"labels"`
+	LastSeenAt *time.Time    `json:"lastSeenAt,omitempty"`
+	Name       string        `json:"name"`
+	RevokedAt  *time.Time    `json:"revokedAt,omitempty"`
+	Trusted    bool          `json:"trusted"`
+	Version    string        `json:"version"`
+}
+
+// RunnerLabel defines model for RunnerLabel.
+type RunnerLabel = string
+
+// RunnerList defines model for RunnerList.
+type RunnerList struct {
+	Items      []Runner `json:"items"`
+	NextCursor *string  `json:"nextCursor,omitempty"`
+}
+
+// RunnerRegistrationToken defines model for RunnerRegistrationToken.
+type RunnerRegistrationToken struct {
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+
+	// Id Opaque ULID.
+	Id      ID            `json:"id"`
+	Labels  []RunnerLabel `json:"labels"`
+	Trusted bool          `json:"trusted"`
+}
+
+// RunnerRegistrationTokenCreate defines model for RunnerRegistrationTokenCreate.
+type RunnerRegistrationTokenCreate struct {
+	ExpiresInMinutes int           `json:"expiresInMinutes"`
+	Labels           []RunnerLabel `json:"labels"`
+
+	// Trusted Trusted runners never run untrusted (fork) jobs and are the only ones that will receive secrets.
+	Trusted bool `json:"trusted"`
+}
+
+// RunnerRegistrationTokenCreated defines model for RunnerRegistrationTokenCreated.
+type RunnerRegistrationTokenCreated struct {
+	RegistrationToken RunnerRegistrationToken `json:"registrationToken"`
+
+	// Token The secret (kiln_rrt_...). Shown once; single use.
+	Token string `json:"token"`
+}
 
 // Session defines model for Session.
 type Session struct {
@@ -450,6 +733,9 @@ type OrgSlug = Slug
 
 // ProjectSlug defines model for ProjectSlug.
 type ProjectSlug = Slug
+
+// RunID Opaque ULID.
+type RunID = ID
 
 // UserID Opaque ULID.
 type UserID = ID
@@ -525,6 +811,43 @@ type ListProjectsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListRunsParams defines parameters for ListRuns.
+type ListRunsParams struct {
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateRunParams defines parameters for CreateRun.
+type CreateRunParams struct {
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
+// StreamJobLogParams defines parameters for StreamJobLog.
+type StreamJobLogParams struct {
+	LastEventID *int `json:"Last-Event-ID,omitempty"`
+}
+
+// ListRunnersParams defines parameters for ListRunners.
+type ListRunnersParams struct {
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GithubWebhookJSONBody defines parameters for GithubWebhook.
+type GithubWebhookJSONBody = map[string]interface{}
+
+// GithubWebhookParams defines parameters for GithubWebhook.
+type GithubWebhookParams struct {
+	XGitHubEvent     string `json:"X-GitHub-Event"`
+	XGitHubDelivery  string `json:"X-GitHub-Delivery"`
+	XHubSignature256 string `json:"X-Hub-Signature-256"`
+}
+
+// BindGitHubInstallationJSONRequestBody defines body for BindGitHubInstallation for application/json ContentType.
+type BindGitHubInstallationJSONRequestBody = GitHubInstallationBind
+
 // ExchangeTokenJSONRequestBody defines body for ExchangeToken for application/json ContentType.
 type ExchangeTokenJSONRequestBody = TokenRequest
 
@@ -540,5 +863,20 @@ type UpdateMemberJSONRequestBody = MemberUpdate
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = ProjectCreate
 
+// LinkRepositoryJSONRequestBody defines body for LinkRepository for application/json ContentType.
+type LinkRepositoryJSONRequestBody = RepositoryLink
+
+// CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
+type CreateRunJSONRequestBody = RunCreate
+
+// CreateRunnerRegistrationTokenJSONRequestBody defines body for CreateRunnerRegistrationToken for application/json ContentType.
+type CreateRunnerRegistrationTokenJSONRequestBody = RunnerRegistrationTokenCreate
+
+// LintPipelineJSONRequestBody defines body for LintPipeline for application/json ContentType.
+type LintPipelineJSONRequestBody = LintRequest
+
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = APITokenCreate
+
+// GithubWebhookJSONRequestBody defines body for GithubWebhook for application/json ContentType.
+type GithubWebhookJSONRequestBody = GithubWebhookJSONBody

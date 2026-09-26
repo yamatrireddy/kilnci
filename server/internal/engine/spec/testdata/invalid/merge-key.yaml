@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: merge keys (<<) are not allowed
+version: 1
+jobs:
+  build:
+    <<: {image: alpine}
+    steps: [{run: x}]

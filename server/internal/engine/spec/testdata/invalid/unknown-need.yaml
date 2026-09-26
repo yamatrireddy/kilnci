@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: unknown job
+version: 1
+jobs:
+  a:
+    image: alpine:3.22
+    needs: [ghost]
+    steps: [{run: x}]

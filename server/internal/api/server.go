@@ -34,17 +34,26 @@ type Deps struct {
 	Authn   Authenticator
 	Auth    AuthService
 	Orgs    OrgService
+	Runs    RunService
+	Runners RunnerService
+	Logs    LogService
+	VCS     VCSService
 	Checks  map[string]ReadinessCheck
 	Options Options
 }
 
 type server struct {
-	log    *slog.Logger
-	checks map[string]ReadinessCheck
-	errs   errorWriter
-	ips    clientIPResolver
-	auth   AuthService
-	orgs   OrgService
+	log     *slog.Logger
+	checks  map[string]ReadinessCheck
+	errs    errorWriter
+	ips     clientIPResolver
+	auth    AuthService
+	orgs    OrgService
+	runs    RunService
+	runners RunnerService
+	logs    LogService
+	vcs     VCSService
+	streams streamLimiter
 }
 
 // NewHandler builds the complete, validated HTTP handler. It returns an error
@@ -57,12 +66,16 @@ func NewHandler(d Deps) (http.Handler, *Router, error) {
 		return nil, nil, errors.New("api: MaxBodyBytes must be positive")
 	}
 	s := &server{
-		log:    d.Log,
-		checks: d.Checks,
-		errs:   errorWriter{log: d.Log},
-		ips:    clientIPResolver{trusted: d.Options.TrustedProxies},
-		auth:   d.Auth,
-		orgs:   d.Orgs,
+		log:     d.Log,
+		checks:  d.Checks,
+		errs:    errorWriter{log: d.Log},
+		ips:     clientIPResolver{trusted: d.Options.TrustedProxies},
+		auth:    d.Auth,
+		orgs:    d.Orgs,
+		runs:    d.Runs,
+		runners: d.Runners,
+		logs:    d.Logs,
+		vcs:     d.VCS,
 	}
 
 	spec, err := loadSpec()
@@ -143,5 +156,34 @@ func (s *server) register(rt *Router) {
 		rt.Handle(post, "/api/v1/orgs/{orgSlug}/projects", authz.ActionProjectsCreate, s.createProject)
 		rt.Handle(get, "/api/v1/orgs/{orgSlug}/projects/{projectSlug}", authz.ActionProjectsRead, s.getProject)
 		rt.Handle(get, "/api/v1/orgs/{orgSlug}/audit-events", authz.ActionAuditRead, s.listAuditEvents)
+	}
+	if s.runs != nil {
+		const runPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs"
+		rt.Handle(get, runPath, authz.ActionRunsList, s.listRuns)
+		rt.Handle(get, runPath+"/{runId}", authz.ActionRunsRead, s.runDetail(func(s *server) runAction { return s.runs.GetRun }))
+		rt.Handle(post, runPath+"/{runId}/cancel", authz.ActionRunsCancel, s.runDetail(func(s *server) runAction { return s.runs.CancelRun }))
+		rt.Handle(post, runPath+"/{runId}/approve", authz.ActionRunsApprove, s.runDetail(func(s *server) runAction { return s.runs.ApproveRun }))
+		rt.Handle(post, "/api/v1/pipelines/lint", authz.ActionPipelinesLint, s.lintPipeline)
+	}
+	if s.vcs != nil {
+		rt.Handle(post, "/api/v1/webhooks/github", authz.PermissionPublic, s.githubWebhook)
+		rt.Handle(post, "/api/v1/admin/github-installations", authz.ActionVCSInstallationsManage, s.bindGitHubInstallation)
+		rt.Handle(del, "/api/v1/admin/github-installations/{installationId}", authz.ActionVCSInstallationsManage, s.unbindGitHubInstallation)
+		rt.Handle(get, "/api/v1/orgs/{orgSlug}/github-installations", authz.ActionVCSInstallationsList, s.listGitHubInstallations)
+		const repoPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/repository"
+		rt.Handle(get, repoPath, authz.ActionRepositoryRead, s.getRepository)
+		rt.Handle(put, repoPath, authz.ActionRepositoryManage, s.linkRepository)
+		rt.Handle(del, repoPath, authz.ActionRepositoryManage, s.unlinkRepository)
+		rt.Handle(post, "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs", authz.ActionRunsCreate, s.createRun)
+	}
+	if s.logs != nil {
+		const jobPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}"
+		rt.Handle(get, jobPath+"/logs", authz.ActionLogsRead, s.getJobLog)
+		rt.Handle(get, jobPath+"/logs/stream", authz.ActionLogsRead, s.streamJobLog)
+	}
+	if s.runners != nil {
+		rt.Handle(get, "/api/v1/orgs/{orgSlug}/runners", authz.ActionRunnersList, s.listRunners)
+		rt.Handle(del, "/api/v1/orgs/{orgSlug}/runners/{runnerId}", authz.ActionRunnersManage, s.revokeRunner)
+		rt.Handle(post, "/api/v1/orgs/{orgSlug}/runner-registration-tokens", authz.ActionRunnersManage, s.createRunnerRegistrationToken)
 	}
 }

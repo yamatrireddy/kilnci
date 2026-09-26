@@ -132,6 +132,23 @@ func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRolePa
 	return role, err
 }
 
+const getOrgBySlug = `-- name: GetOrgBySlug :one
+SELECT id, slug, name, created_at FROM orgs WHERE slug = $1
+`
+
+// GetOrgBySlug is for instance-admin operations only (no membership check).
+func (q *Queries) GetOrgBySlug(ctx context.Context, slug string) (Org, error) {
+	row := q.db.QueryRow(ctx, getOrgBySlug, slug)
+	var i Org
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getOrgForMember = `-- name: GetOrgForMember :one
 SELECT o.id, o.slug, o.name, o.created_at, m.role
 FROM orgs o

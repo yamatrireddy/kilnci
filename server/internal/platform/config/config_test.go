@@ -38,6 +38,7 @@ func validEnv() map[string]string {
 		"KILN_OIDC_ISSUER_URL":    "https://idp.example.com",
 		"KILN_OIDC_CLIENT_ID":     "kiln",
 		"KILN_OIDC_CLIENT_SECRET": fakeOIDCSecret,
+		"KILN_LOG_DIR":            "/var/lib/kiln/logs",
 	}
 }
 
@@ -66,6 +67,26 @@ func TestLoad_ValidMinimal_UsesSecureDefaults(t *testing.T) {
 	}
 	if !c.DB.MigrateOnStart {
 		t.Error("MigrateOnStart should default true")
+	}
+}
+
+func TestLoad_RunnerListener(t *testing.T) {
+	c, err := Load(source(validEnv(), nil), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Runner.Enabled() || c.Runner.Addr != ":9443" {
+		t.Fatalf("runner listener must be off by default: %+v", c.Runner)
+	}
+	env := validEnv()
+	env["KILN_RUNNER_CA_DIR"] = "/etc/kiln/runner-ca"
+	env["KILN_RUNNER_HOSTNAMES"] = "Runners.Example.com, 10.0.0.5"
+	c, err = Load(source(env, nil), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Runner.Enabled() || c.Runner.Hostnames[0] != "runners.example.com" || c.Runner.Hostnames[1] != "10.0.0.5" {
+		t.Fatalf("runner = %+v", c.Runner)
 	}
 }
 
@@ -120,6 +141,49 @@ func TestLoad_Rejects(t *testing.T) {
 		{"max conns", func(e map[string]string) { e["KILN_DB_MAX_CONNS"] = "0" }, "MAX_CONNS"},
 		{"bad int", func(e map[string]string) { e["KILN_DB_MAX_CONNS"] = "many" }, "integer"},
 		{"negative timeout", func(e map[string]string) { e["KILN_SHUTDOWN_TIMEOUT"] = "-1s" }, "positive"},
+		{"unknown log store", func(e map[string]string) { e["KILN_LOG_STORE"] = "gcs" }, "KILN_LOG_STORE"},
+		{"fs store without dir", func(e map[string]string) { delete(e, "KILN_LOG_DIR") }, "KILN_LOG_DIR is required"},
+		{"s3 without credentials", func(e map[string]string) {
+			e["KILN_LOG_STORE"] = "s3"
+			e["KILN_S3_ENDPOINT"] = "minio:9000"
+		}, "KILN_S3_BUCKET"},
+		{"s3 endpoint with scheme", func(e map[string]string) {
+			e["KILN_LOG_STORE"] = "s3"
+			e["KILN_S3_ENDPOINT"] = "https://minio:9000"
+		}, "without a scheme"},
+		{"s3 plaintext in prod", func(e map[string]string) {
+			e["KILN_LOG_STORE"] = "s3"
+			e["KILN_S3_ENDPOINT"] = "minio:9000"
+			e["KILN_S3_USE_TLS"] = "false"
+		}, "KILN_S3_USE_TLS"},
+		{"nats url with password", func(e map[string]string) { e["KILN_NATS_URL"] = "nats://u:p@nats:4222" }, "without credentials"},
+		{"insecure nats in prod", func(e map[string]string) {
+			e["KILN_NATS_URL"] = "nats://nats:4222"
+			e["KILN_NATS_INSECURE"] = "true"
+		}, "KILN_NATS_INSECURE"},
+		{"tiny log limit", func(e map[string]string) { e["KILN_LOG_MAX_BYTES"] = "10" }, "KILN_LOG_MAX_BYTES"},
+		{"github without key", func(e map[string]string) {
+			e["KILN_GITHUB_APP_ID"] = "42"
+			e["KILN_GITHUB_WEBHOOK_SECRET"] = "0123456789abcdefghijKLMN"
+		}, "KILN_GITHUB_APP_PRIVATE_KEY_FILE is required"},
+		{"github weak webhook secret", func(e map[string]string) {
+			e["KILN_GITHUB_APP_ID"] = "42"
+			e["KILN_GITHUB_WEBHOOK_SECRET"] = "short"
+		}, "at least 20 characters"},
+		{"github http api", func(e map[string]string) {
+			e["KILN_GITHUB_APP_ID"] = "42"
+			e["KILN_GITHUB_API_URL"] = "http://ghe.example.com/api/v3"
+		}, "KILN_GITHUB_API_URL"},
+		{"runner ca without hostnames", func(e map[string]string) { e["KILN_RUNNER_CA_DIR"] = "/ca" }, "KILN_RUNNER_HOSTNAMES is required"},
+		{"bad runner hostname", func(e map[string]string) {
+			e["KILN_RUNNER_CA_DIR"] = "/ca"
+			e["KILN_RUNNER_HOSTNAMES"] = "runners.example.com,bad_host!"
+		}, "not a hostname"},
+		{"bad runner addr", func(e map[string]string) {
+			e["KILN_RUNNER_CA_DIR"] = "/ca"
+			e["KILN_RUNNER_HOSTNAMES"] = "runners.example.com"
+			e["KILN_RUNNER_ADDR"] = "9443"
+		}, "KILN_RUNNER_ADDR"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

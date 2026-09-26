@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: reserved KILN_ prefix
+version: 1
+env:
+  KILN_COMMIT_SHA: spoofed
+jobs:
+  a:
+    image: alpine:3.22
+    steps: [{run: x}]

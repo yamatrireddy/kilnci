@@ -11,7 +11,6 @@ package orgs
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -25,6 +24,7 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/platform/ids"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/logging"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
+	"github.com/yamatrireddy/kilnci/server/internal/service/paging"
 )
 
 var tracer = otel.Tracer("github.com/yamatrireddy/kilnci/server/internal/service/orgs")
@@ -78,47 +78,10 @@ func NewService(s Store, az Authorizer, a Auditor, gen *ids.Generator, now func(
 }
 
 // Page is one page of results.
-type Page[T any] struct {
-	Items      []T
-	NextCursor string
-}
+type Page[T any] = paging.Page[T]
 
-// PageRequest selects a page. Cursor is opaque; Limit is clamped to 1..100.
-type PageRequest struct {
-	Cursor string
-	Limit  int
-}
-
-const (
-	defaultLimit = 50
-	maxLimit     = 100
-)
-
-func (pr PageRequest) parse() (after string, limit int32, err error) {
-	limit = defaultLimit
-	if pr.Limit > 0 {
-		limit = int32(min(pr.Limit, maxLimit)) //nolint:gosec // bounded above
-	}
-	if pr.Cursor == "" {
-		return "", limit, nil
-	}
-	b, err := base64.RawURLEncoding.DecodeString(pr.Cursor)
-	if err != nil || !ids.Valid(string(b)) {
-		return "", 0, domain.NewValidationError("cursor", "is not a valid cursor")
-	}
-	return string(b), limit, nil
-}
-
-func encodeCursor(id string) string { return base64.RawURLEncoding.EncodeToString([]byte(id)) }
-
-// page trims a limit+1 result to limit and computes the next cursor.
-func page[T any](items []T, limit int32, idOf func(T) string) Page[T] {
-	if len(items) <= int(limit) {
-		return Page[T]{Items: items}
-	}
-	items = items[:limit]
-	return Page[T]{Items: items, NextCursor: encodeCursor(idOf(items[len(items)-1]))}
-}
+// PageRequest selects a page.
+type PageRequest = paging.Request
 
 func principal(ctx context.Context) (*authz.Principal, error) {
 	p, ok := authz.FromContext(ctx)
@@ -154,7 +117,7 @@ func (s *Service) ListOrgs(ctx context.Context, pr PageRequest) (Page[domain.Org
 	if err := s.az.Check(ctx, p, authz.ActionOrgsList, authz.Resource{OwnerUserID: p.UserID}); err != nil {
 		return Page[domain.OrgWithRole]{}, fmt.Errorf("authorize: %w", err)
 	}
-	after, limit, err := pr.parse()
+	after, limit, err := pr.Parse()
 	if err != nil {
 		return Page[domain.OrgWithRole]{}, err
 	}
@@ -162,7 +125,7 @@ func (s *Service) ListOrgs(ctx context.Context, pr PageRequest) (Page[domain.Org
 	if err != nil {
 		return Page[domain.OrgWithRole]{}, fmt.Errorf("list orgs: %w", err)
 	}
-	return page(orgs, limit, func(o domain.OrgWithRole) string { return o.ID }), nil
+	return paging.Build(orgs, limit, func(o domain.OrgWithRole) string { return o.ID }), nil
 }
 
 // CreateOrg creates an org owned by the caller (instance admins only).
@@ -232,7 +195,7 @@ func (s *Service) ListMembers(ctx context.Context, orgSlug string, pr PageReques
 	if err != nil {
 		return Page[domain.Member]{}, err
 	}
-	after, limit, err := pr.parse()
+	after, limit, err := pr.Parse()
 	if err != nil {
 		return Page[domain.Member]{}, err
 	}
@@ -240,7 +203,7 @@ func (s *Service) ListMembers(ctx context.Context, orgSlug string, pr PageReques
 	if err != nil {
 		return Page[domain.Member]{}, fmt.Errorf("list members: %w", err)
 	}
-	return page(ms, limit, func(m domain.Member) string { return m.UserID }), nil
+	return paging.Build(ms, limit, func(m domain.Member) string { return m.UserID }), nil
 }
 
 // normalizeEmail validates an email address supplied by an admin.
@@ -471,7 +434,7 @@ func (s *Service) ListProjects(ctx context.Context, orgSlug string, pr PageReque
 	if err != nil {
 		return Page[domain.Project]{}, err
 	}
-	after, limit, err := pr.parse()
+	after, limit, err := pr.Parse()
 	if err != nil {
 		return Page[domain.Project]{}, err
 	}
@@ -479,7 +442,7 @@ func (s *Service) ListProjects(ctx context.Context, orgSlug string, pr PageReque
 	if err != nil {
 		return Page[domain.Project]{}, fmt.Errorf("list projects: %w", err)
 	}
-	return page(ps, limit, func(p domain.Project) string { return p.ID }), nil
+	return paging.Build(ps, limit, func(p domain.Project) string { return p.ID }), nil
 }
 
 // CreateProject creates a project in an org (org admins).
@@ -546,7 +509,7 @@ func (s *Service) ListAuditEvents(ctx context.Context, orgSlug string, pr PageRe
 	if err != nil {
 		return Page[domain.AuditEvent]{}, err
 	}
-	before, limit, err := pr.parse()
+	before, limit, err := pr.Parse()
 	if err != nil {
 		return Page[domain.AuditEvent]{}, err
 	}
@@ -554,5 +517,5 @@ func (s *Service) ListAuditEvents(ctx context.Context, orgSlug string, pr PageRe
 	if err != nil {
 		return Page[domain.AuditEvent]{}, fmt.Errorf("list audit events: %w", err)
 	}
-	return page(evs, limit, func(e domain.AuditEvent) string { return e.ID }), nil
+	return paging.Build(evs, limit, func(e domain.AuditEvent) string { return e.ID }), nil
 }

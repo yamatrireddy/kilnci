@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: dependency cycle
+version: 1
+jobs:
+  a:
+    image: alpine:3.22
+    needs: [b]
+    steps: [{run: x}]
+  b:
+    image: alpine:3.22
+    needs: [a]
+    steps: [{run: x}]

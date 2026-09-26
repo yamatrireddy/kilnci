@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: explicit YAML tags are not allowed
+version: 1
+jobs: !include other.yaml

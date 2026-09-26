@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# expect: version (line 3): must be 1
+version: 2
+jobs:
+  a:
+    image: alpine:3.22
+    steps: [{run: x}]
