@@ -6,9 +6,22 @@ and container-based plugins, with web, desktop, and mobile clients over one API.
 Kiln runs untrusted code next to production credentials, so security comes first;
 see [SECURITY.md](SECURITY.md) and [docs/threat-model.md](docs/threat-model.md).
 
-**Status:** Phase 0 (foundations) is in place: the Go control plane with OIDC
-sign-in, RBAC, audit log, and API tokens; the web app (React + Tailwind CSS);
-and the Tauri desktop app. Pipelines arrive in Phase 1 ([roadmap](docs/roadmap.md)).
+**Status:** Phase 1 (CI core) is in progress; see the [roadmap](docs/roadmap.md)
+for the per-slice table.
+
+- **Phase 0 (foundations), done:** the Go control plane with OIDC sign-in, RBAC,
+  audit log, and API tokens; the web app (React + Tailwind CSS); and the Tauri
+  desktop app.
+- **Phase 1 (CI core), done so far:** pipeline spec and safe YAML loader, DAG
+  planning and state transitions, runs and jobs APIs, the scheduler with leases,
+  the mTLS pull-only runner protocol, the hardened Docker executor with runner-side
+  secret masking, log storage and live tails over SSE, the `kiln-runner` agent,
+  the GitHub App with webhook triggers and commit statuses, and the Phase 1
+  security review.
+- **Phase 1, not started:** the runs UI with the sanitizing log viewer, and the
+  `kiln lint` CLI.
+- **Next:** Phase 2 (secrets and trust), then GitOps, plugins and mobile, and
+  1.0 hardening.
 
 - Develop: [docs/development.md](docs/development.md)
 - API: [docs/api/openapi.yaml](docs/api/openapi.yaml)
