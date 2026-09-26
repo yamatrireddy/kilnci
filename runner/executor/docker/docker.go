@@ -8,9 +8,11 @@
 // repository credential ever exists), then runs every step with docker exec
 // in one job container. The job container runs as a non-root user with all
 // capabilities dropped, no-new-privileges, the runtime's default seccomp and
-// AppArmor profiles, an init process, and memory/CPU/PID limits; it has no
-// host namespaces, no host mounts, and never the Docker socket. Everything
-// is removed when the job ends, whatever the outcome.
+// AppArmor profiles, an init process, and memory/CPU/PID/disk limits; it has
+// no host namespaces, no host mounts, and never the Docker socket. Job
+// images are never pulled from loopback, private, or link-local registries,
+// since dockerd pulls from the host network. Everything is removed when the
+// job ends, whatever the outcome.
 package docker
 
 import (
@@ -19,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -54,25 +57,52 @@ type API interface {
 	ExecCreate(ctx context.Context, containerID string, opts client.ExecCreateOptions) (client.ExecCreateResult, error)
 	ExecAttach(ctx context.Context, execID string, opts client.ExecAttachOptions) (client.ExecAttachResult, error)
 	ExecInspect(ctx context.Context, execID string, opts client.ExecInspectOptions) (client.ExecInspectResult, error)
+	Info(ctx context.Context, opts client.InfoOptions) (client.SystemInfoResult, error)
 }
+
+// DefaultUser is the uid:gid jobs run as by default. It is deliberately not
+// 1000, which is usually the host's first human user: without user
+// namespaces, a container uid equals the host uid, so a job escaping its
+// container would own that user's files. 65532 is the conventional
+// "nonroot" id of distroless images. Operators should additionally enable
+// dockerd's userns-remap so container ids map to an unprivileged host range.
+const DefaultUser = "65532:65532"
 
 // Options are runner-operator settings. Operators may lower limits; nothing
 // here can grant privileges.
 type Options struct {
 	HelperImage string
-	// User runs the job and clone containers. Must be non-root. Default 1000:1000.
+	// User runs the job and clone containers. Must be non-root. Default
+	// DefaultUser (65532:65532); see DefaultUser for why, and enable
+	// dockerd's userns-remap on runner hosts.
 	User        string
 	MemoryBytes int64 // default 4 GiB (no swap)
 	NanoCPUs    int64 // default 2 CPUs
 	PidsLimit   int64 // default 1024
 	TmpfsSize   string
-	Log         *slog.Logger
+	// DiskLimitBytes caps each container's writable layer and the job's
+	// workspace volume (default DefaultDiskLimitBytes). It is enforced by
+	// dockerd only with the overlay2 storage driver on XFS mounted with
+	// pquota; on anything else jobs fail (see Preflight) unless the limit
+	// is disabled.
+	DiskLimitBytes int64
+	// DisableDiskLimit runs jobs without a disk limit, for storage drivers
+	// that cannot enforce one. A job can then fill the Docker data root.
+	DisableDiskLimit bool
+	// RegistryAllowlist lists registries (exact host or host:port) that jobs
+	// may pull from even though they are on a loopback, private, or
+	// link-local address, such as an internal mirror.
+	RegistryAllowlist []string
+	// Resolver resolves registry hosts; default net.DefaultResolver.
+	Resolver Resolver
+	Log      *slog.Logger
 }
 
 // Executor runs jobs with Docker.
 type Executor struct {
-	api  API
-	opts Options
+	api               API
+	opts              Options
+	allowedRegistries map[string]struct{}
 }
 
 var userPattern = regexp.MustCompile(`^[1-9][0-9]{0,9}:[1-9][0-9]{0,9}$`)
@@ -83,7 +113,7 @@ func New(api API, opts Options) (*Executor, error) {
 		opts.HelperImage = DefaultHelperImage
 	}
 	if opts.User == "" {
-		opts.User = "1000:1000"
+		opts.User = DefaultUser
 	}
 	if !userPattern.MatchString(opts.User) {
 		return nil, errors.New("docker executor: user must be a non-root uid:gid")
@@ -100,10 +130,22 @@ func New(api API, opts Options) (*Executor, error) {
 	if opts.TmpfsSize == "" {
 		opts.TmpfsSize = "1g"
 	}
+	if opts.DiskLimitBytes <= 0 {
+		opts.DiskLimitBytes = DefaultDiskLimitBytes
+	}
+	if opts.Resolver == nil {
+		opts.Resolver = net.DefaultResolver
+	}
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Executor{api: api, opts: opts}, nil
+	allowed := map[string]struct{}{}
+	for _, r := range opts.RegistryAllowlist {
+		if r = strings.ToLower(strings.TrimSpace(r)); r != "" {
+			allowed[r] = struct{}{}
+		}
+	}
+	return &Executor{api: api, opts: opts, allowedRegistries: allowed}, nil
 }
 
 var (
@@ -113,7 +155,21 @@ var (
 	jobIDPattern   = regexp.MustCompile(`^[0-9A-Z]{26}$`)
 )
 
-func validate(job executor.Job) error {
+// validate rejects malformed jobs and images from registries the runner
+// must not pull from (see checkRegistry). Registry refusals wrap both
+// executor.ErrInvalidJob and errRegistryBlocked.
+func (e *Executor) validate(ctx context.Context, job executor.Job) error {
+	if err := validateSpec(job); err != nil {
+		return err
+	}
+	if err := e.checkRegistry(ctx, job.Image); err != nil {
+		return fmt.Errorf("%w: %w", executor.ErrInvalidJob, err)
+	}
+	return nil
+}
+
+// validateSpec checks the job's syntax.
+func validateSpec(job executor.Job) error {
 	if !jobIDPattern.MatchString(job.ID) || len(job.Image) > 255 || !imagePattern.MatchString(job.Image) || len(job.Steps) == 0 {
 		return executor.ErrInvalidJob
 	}
@@ -153,7 +209,11 @@ type jobResources struct {
 
 // Run executes the job.
 func (e *Executor) Run(ctx context.Context, job executor.Job, out io.Writer) (executor.Result, error) {
-	if err := validate(job); err != nil {
+	if err := e.validate(ctx, job); err != nil {
+		if errors.Is(err, errRegistryBlocked) {
+			note(out, "==> %s\n", err)
+			return executor.Result{Outcome: executor.Failed, ExitCode: -1, Reason: "image registry not allowed on this runner"}, nil
+		}
 		return executor.Result{}, err
 	}
 	if job.Timeout > 0 {
@@ -166,6 +226,15 @@ func (e *Executor) Run(ctx context.Context, job executor.Job, out io.Writer) (ex
 	defer e.cleanup(context.WithoutCancel(ctx), res)
 	labels := map[string]string{"io.kiln.managed": "true", "io.kiln.job": job.ID}
 
+	// Fail closed if the daemon would silently ignore the disk limit.
+	if err := e.checkDiskLimitSupport(ctx); err != nil {
+		if errors.Is(err, errDiskLimitUnsupported) {
+			e.opts.Log.ErrorContext(ctx, "job disk limit cannot be enforced", "error", err)
+			return executor.Result{Outcome: executor.Failed, ExitCode: -1, Reason: "the runner cannot enforce the job disk limit"}, nil
+		}
+		return e.infraFailure(ctx, "check disk limit support", err)
+	}
+
 	netRes, err := e.api.NetworkCreate(ctx, "kiln-net-"+suffix, client.NetworkCreateOptions{
 		Driver: "bridge", Labels: labels,
 		// Jobs cannot talk to other containers on the bridge.
@@ -175,7 +244,10 @@ func (e *Executor) Run(ctx context.Context, job executor.Job, out io.Writer) (ex
 		return e.infraFailure(ctx, "create network", err)
 	}
 	res.network = netRes.ID
-	vol, err := e.api.VolumeCreate(ctx, client.VolumeCreateOptions{Name: "kiln-ws-" + suffix, Labels: labels})
+	// The size option is enforced with an XFS project quota; dockerd rejects
+	// it where quotas are unavailable, so the job fails rather than running
+	// unlimited.
+	vol, err := e.api.VolumeCreate(ctx, client.VolumeCreateOptions{Name: "kiln-ws-" + suffix, Labels: labels, DriverOpts: e.volumeOpts()})
 	if err != nil {
 		return e.infraFailure(ctx, "create workspace", err)
 	}
@@ -291,6 +363,9 @@ func (e *Executor) hardened(networkMode string, volume string, capAdd ...string)
 		Resources: container.Resources{
 			Memory: e.opts.MemoryBytes, MemorySwap: e.opts.MemoryBytes, NanoCPUs: e.opts.NanoCPUs, PidsLimit: &pids,
 		},
+		// Caps the writable layer; dockerd refuses to create the container
+		// if the storage driver cannot enforce it.
+		StorageOpt: e.storageOpt(),
 	}
 }
 

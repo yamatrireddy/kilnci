@@ -29,7 +29,40 @@ func newExecutor(t *testing.T) (*Executor, *client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := e.Preflight(t.Context()); err != nil {
+		// Most CI daemons are not on XFS with pquota. The fail-closed path
+		// is covered by TestDocker_DiskLimit; the other tests run unlimited.
+		t.Logf("daemon cannot enforce the disk limit, running without it: %v", err)
+		if e, err = New(cli, Options{DisableDiskLimit: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return e, cli
+}
+
+// TestDocker_DiskLimit: where the daemon can enforce the limit, writing past
+// it fails the step; where it cannot, the job fails closed without running.
+func TestDocker_DiskLimit(t *testing.T) {
+	cli, err := client.New(client.FromEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	e, err := New(cli, Options{DiskLimitBytes: 64 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	supported := e.Preflight(t.Context()) == nil
+	res, out := run(t, e, job(executor.Step{Name: "fill", Run: `echo started; dd if=/dev/zero of=/workspace/big bs=1M count=128`}))
+	if res.Outcome != executor.Failed {
+		t.Fatalf("result = %+v\n%s", res, out)
+	}
+	if supported && !strings.Contains(out, "started") {
+		t.Fatalf("step did not run: %+v\n%s", res, out)
+	}
+	if !supported && (strings.Contains(out, "started") || !strings.Contains(res.Reason, "disk limit")) {
+		t.Fatalf("job ran without an enforceable disk limit: %+v\n%s", res, out)
+	}
 }
 
 var jobSeq = 0
@@ -66,7 +99,7 @@ func TestDocker_SandboxIsHardened(t *testing.T) {
 		t.Fatalf("result = %+v\n%s", res, out)
 	}
 	for _, want := range []string{
-		"uid=1000 gid=1000",
+		"uid=65532 gid=65532",
 		"CapEff:\t0000000000000000",
 		"CapPrm:\t0000000000000000",
 		"NoNewPrivs:\t1",
