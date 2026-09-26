@@ -86,6 +86,7 @@ test: test-go test-ts ## Run all unit tests
 .PHONY: test-go
 test-go:
 	cd server && go test $(RACE) -count=1 ./...
+	cd runner && go test $(RACE) -count=1 ./...
 
 .PHONY: test-ts
 test-ts:
@@ -94,6 +95,7 @@ test-ts:
 .PHONY: test-integration
 test-integration: ## Integration tests (needs Docker; uses testcontainers)
 	cd server && go test $(RACE) -count=1 -tags=integration ./...
+	cd runner && go test $(RACE) -count=1 -tags=integration ./...
 
 .PHONY: e2e
 e2e: ## End-to-end tests against the compose stack
@@ -117,6 +119,7 @@ lint: lint-go lint-ts lint-workflows ## golangci-lint, eslint + tsc, actionlint 
 .PHONY: lint-go
 lint-go:
 	cd server && $(call tool,golangci-lint) run --config ../.golangci.yml ./...
+	cd runner && $(call tool,golangci-lint) run --config ../.golangci.yml ./...
 
 .PHONY: lint-ts
 lint-ts:
@@ -153,10 +156,12 @@ sec-gitleaks:
 .PHONY: sec-gosec
 sec-gosec:
 	cd server && $(call tool,gosec) -quiet -severity medium -confidence medium -exclude-generated ./...
+	cd runner && $(call tool,gosec) -quiet -severity medium -confidence medium -exclude-generated ./...
 
 .PHONY: sec-govulncheck
 sec-govulncheck:
 	cd server && $(call tool,govulncheck) ./...
+	cd runner && $(call tool,govulncheck) ./...
 
 .PHONY: sec-osv
 sec-osv:
@@ -180,4 +185,5 @@ sec-trivy: ## Needs Docker
 .PHONY: license-check
 license-check: ## Dependency licenses against the allowlist
 	cd server && $(call tool,go-licenses) check ./... --ignore github.com/yamatrireddy/kilnci --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
+	cd runner && $(call tool,go-licenses) check ./... --ignore github.com/yamatrireddy/kilnci --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
 	node scripts/license-check.mjs
