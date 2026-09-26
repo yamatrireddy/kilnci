@@ -94,7 +94,7 @@ func lint(ctx context.Context, args []string, e env) int {
 	fl.SetOutput(e.stderr)
 	fl.Usage = func() { _, _ = fmt.Fprintln(e.stderr, usage) }
 	server := fl.String("server", "", "Kiln server URL (default $KILN_SERVER)")
-	tokenFile := fl.String("token-file", "", "file holding the API token, or - for stdin (default $KILN_TOKEN; tokens are never taken as arguments)")
+	credsPath := fl.String("token-file", "", "file holding the API token, or - for stdin (default $KILN_TOKEN; tokens are never taken as arguments)")
 	format := fl.String("format", "text", "output format: text or json")
 	if err := fl.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -109,14 +109,14 @@ func lint(ctx context.Context, args []string, e env) int {
 	if fl.NArg() == 1 {
 		file = fl.Arg(0)
 	}
-	if file == "-" && *tokenFile == "-" {
+	if file == "-" && *credsPath == "-" {
 		return fail(e, errors.New("the pipeline and the token cannot both come from stdin"))
 	}
 	f, err := output.ParseFormat(*format)
 	if err != nil {
 		return fail(e, err)
 	}
-	cfg, err := config.Load(config.Options{Server: *server, TokenFile: *tokenFile}, e.lookup, e.stdin)
+	cfg, err := config.Load(config.Options{Server: *server, TokenFile: *credsPath}, e.lookup, e.stdin)
 	if err != nil {
 		return fail(e, err)
 	}
