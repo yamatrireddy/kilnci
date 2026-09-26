@@ -163,15 +163,17 @@ sec-govulncheck:
 	cd server && $(call tool,govulncheck) ./...
 	cd runner && $(call tool,govulncheck) ./...
 
-# GOWORK=off: tools/ is deliberately outside go.work. Go call analysis is
-# off: tools/go.mod declares tools but no packages, so the analysis fails
-# there, and without it every known Go vulnerability is reported whether
-# or not it is reachable (stricter). Per-directory ignores (each with a
-# reason and an expiry) live in osv-scanner.toml files.
+# Two passes. The workspace modules, npm, and Cargo get Go call analysis,
+# which reports only Go vulnerabilities the code can reach. tools/ is
+# deliberately outside go.work and declares tools but no packages, so call
+# analysis cannot run there: it is scanned on its own with GOWORK=off and
+# without call analysis (every known vulnerability reported). Per-directory
+# ignores (each with a reason and an expiry) live in osv-scanner.toml files.
 .PHONY: sec-osv
 sec-osv:
-	GOWORK=off $(call tool,osv-scanner) scan source --recursive --no-call-analysis=go \
+	$(call tool,osv-scanner) scan source --recursive --experimental-exclude tools \
 	  --lockfile=pnpm-lock.yaml --lockfile=server/go.mod .
+	GOWORK=off $(call tool,osv-scanner) scan source --no-call-analysis=go --lockfile=tools/go.mod
 
 .PHONY: sec-pnpm-audit
 sec-pnpm-audit:
