@@ -16,10 +16,9 @@ for the per-slice table.
   planning and state transitions, runs and jobs APIs, the scheduler with leases,
   the mTLS pull-only runner protocol, the hardened Docker executor with runner-side
   secret masking, log storage and live tails over SSE, the `kiln-runner` agent,
-  the GitHub App with webhook triggers and commit statuses, and the Phase 1
-  security review.
-- **Phase 1, not started:** the runs UI with the sanitizing log viewer, and the
-  `kiln lint` CLI.
+  the GitHub App with webhook triggers and commit statuses, the Phase 1
+  security review, and the runs UI with the sanitizing log viewer.
+- **Phase 1, not started:** the `kiln lint` CLI.
 - **Next:** Phase 2 (secrets and trust), then GitOps, plugins and mobile, and
   1.0 hardening.
 
