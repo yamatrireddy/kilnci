@@ -6,17 +6,24 @@
 
 -- +goose Up
 
+-- Composite keys let child tables prove that the project (and run) they
+-- reference belongs to the same org as the row itself, so a caller bug can
+-- never file one tenant's run under another tenant's project.
+ALTER TABLE projects ADD CONSTRAINT projects_org_id_id UNIQUE (org_id, id);
+
 -- Per-project run numbers, allocated under a row lock.
 CREATE TABLE project_run_counters (
-    project_id  text PRIMARY KEY REFERENCES projects (id) ON DELETE CASCADE,
-    org_id      text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
-    last_number bigint NOT NULL DEFAULT 0
+    project_id  text PRIMARY KEY,
+    org_id      text NOT NULL,
+    last_number bigint NOT NULL DEFAULT 0,
+    CONSTRAINT project_run_counters_project FOREIGN KEY (org_id, project_id)
+        REFERENCES projects (org_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE runs (
     id              text PRIMARY KEY,
-    org_id          text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
-    project_id      text NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    org_id          text NOT NULL,
+    project_id      text NOT NULL,
     number          bigint NOT NULL,
     status          text NOT NULL CHECK (status IN ('awaiting_approval', 'queued', 'running', 'succeeded', 'failed', 'canceled')),
     event           text NOT NULL CHECK (event IN ('push', 'pull_request', 'manual')),
@@ -34,6 +41,9 @@ CREATE TABLE runs (
     created_at      timestamptz NOT NULL,
     started_at      timestamptz,
     finished_at     timestamptz,
+    CONSTRAINT runs_project FOREIGN KEY (org_id, project_id) REFERENCES projects (org_id, id) ON DELETE CASCADE,
+    -- Referenced by jobs so a job's org and trust always equal its run's.
+    CONSTRAINT runs_org_id_trusted UNIQUE (org_id, id, trusted),
     CONSTRAINT runs_project_number UNIQUE (project_id, number),
     CONSTRAINT runs_project_idempotency UNIQUE (project_id, idempotency_key),
     -- A run from a fork is never trusted (ADR-0005 §9, ADR-0008 §5).
@@ -44,8 +54,8 @@ CREATE INDEX runs_project ON runs (org_id, project_id, id DESC);
 
 CREATE TABLE jobs (
     id               text PRIMARY KEY,
-    org_id           text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
-    run_id           text NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    org_id           text NOT NULL,
+    run_id           text NOT NULL,
     name             text NOT NULL CHECK (name ~ '^[a-z][a-z0-9_-]{0,62}$'),
     status           text NOT NULL CHECK (status IN ('pending', 'queued', 'running', 'succeeded', 'failed', 'canceled', 'skipped')),
     needs            text[] NOT NULL,
@@ -67,6 +77,7 @@ CREATE TABLE jobs (
     queued_at        timestamptz,
     started_at       timestamptz,
     finished_at      timestamptz,
+    CONSTRAINT jobs_run FOREIGN KEY (org_id, run_id, trusted) REFERENCES runs (org_id, id, trusted) ON DELETE CASCADE,
     CONSTRAINT jobs_run_name UNIQUE (run_id, name),
     -- A leased job always has a runner and an expiry; nothing else has a lease.
     CONSTRAINT jobs_lease_consistent CHECK (
@@ -83,3 +94,4 @@ CREATE INDEX jobs_lease_expiry ON jobs (lease_expires_at) WHERE status = 'runnin
 DROP TABLE IF EXISTS jobs;
 DROP TABLE IF EXISTS runs;
 DROP TABLE IF EXISTS project_run_counters;
+ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_org_id_id;

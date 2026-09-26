@@ -568,14 +568,21 @@ func (p *parser) steps(path string, n *yaml.Node, jobTimeout time.Duration) []St
 }
 
 func hasControl(s string) bool {
-	return strings.ContainsFunc(s, unicode.IsControl)
+	return strings.ContainsFunc(s, isUnsafeRune)
+}
+
+// isUnsafeRune reports control characters and invisible format characters
+// (bidi overrides, zero-width characters, line separators) that could make
+// a name display differently from what it says.
+func isUnsafeRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
 }
 
 // sanitizeName replaces control characters (e.g. ANSI escapes in a script's
 // first line) so derived names are safe to display.
 func sanitizeName(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if isUnsafeRune(r) {
 			return '?'
 		}
 		return r

@@ -7,6 +7,7 @@ package runs_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +113,8 @@ func (h *harness) as(p *authz.Principal) context.Context {
 
 func (h *harness) create(nr runs.NewRun) domain.Run {
 	h.t.Helper()
-	if nr.Pipeline == nil && nr.LoadError == "" {
+	nr.Trusted = !nr.IsFork // the harness models same-repository changes as trusted
+	if nr.Pipeline == nil && nr.PipelineErr == nil {
 		pl, err := spec.Parse([]byte(pipelineYAML))
 		if err != nil {
 			h.t.Fatal(err)
@@ -158,11 +160,11 @@ func jobStatus(d runs.Detail, name string) domain.JobStatus {
 
 func TestCreateRun_QueuesRootJobsAndStoresPipeline(t *testing.T) {
 	h := newHarness(t)
-	r := h.create(runs.NewRun{Title: "Fix\x1b[31m bug\nsecond line", ActorLogin: "octocat"})
+	r := h.create(runs.NewRun{Title: "Fix\x1b[31m bug\u202e\u200dx\nsecond line", ActorLogin: "octocat"})
 	if r.Status != domain.RunQueued || r.Number < 1 || !r.Trusted || r.IsFork {
 		t.Fatalf("run = %+v", r)
 	}
-	if r.Title != "Fix\uFFFD[31m bug" {
+	if r.Title != "Fix\uFFFD[31m bug\uFFFD\uFFFDx" {
 		t.Fatalf("title not sanitized: %q", r.Title)
 	}
 	d := h.detail(r.ID)
@@ -205,12 +207,63 @@ func TestCreateRun_ForkRunsAwaitApprovalAndAreUntrusted(t *testing.T) {
 
 func TestCreateRun_InvalidPipelineCreatesFailedRun(t *testing.T) {
 	h := newHarness(t)
-	r := h.create(runs.NewRun{LoadError: "jobs: is required"})
-	if r.Status != domain.RunFailed || r.Error != "jobs: is required" || r.FinishedAt == nil {
+	_, perr := spec.Parse([]byte("version: 1\n"))
+	r := h.create(runs.NewRun{PipelineErr: perr})
+	if r.Status != domain.RunFailed || r.Error != "invalid pipeline: jobs (line 1): is required" || r.FinishedAt == nil {
 		t.Fatalf("run = %+v", r)
+	}
+	// Raw errors never reach viewers; only fixed messages do.
+	r = h.create(runs.NewRun{PipelineErr: errors.New("fetch https://internal.example/secret: status 500")})
+	if r.Error != "the pipeline could not be loaded" {
+		t.Fatalf("raw error stored: %q", r.Error)
+	}
+	r = h.create(runs.NewRun{PipelineErr: fmt.Errorf("fetch: %w", runs.ErrNoPipeline)})
+	if r.Error != "no .kiln/pipeline.yaml in this commit" {
+		t.Fatalf("missing pipeline error = %q", r.Error)
 	}
 	if d := h.detail(r.ID); len(d.Jobs) != 0 {
 		t.Fatalf("failed run has jobs: %+v", d.Jobs)
+	}
+}
+
+// TestCreateRun_TrustFailsClosed: a caller that does not positively assert
+// trust (e.g. fork detection failed because the head repo was deleted) gets
+// an untrusted run that needs approval.
+func TestCreateRun_TrustFailsClosed(t *testing.T) {
+	h := newHarness(t)
+	pl, _ := spec.Parse([]byte(pipelineYAML))
+	r, err := h.svc.CreateRun(t.Context(), runs.NewRun{
+		OrgID: h.org.ID, ProjectID: h.project.ID, Event: domain.EventPullRequest, Ref: "refs/pull/4/head",
+		CommitSHA: strings.Repeat("b", 40), Pipeline: pl,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Trusted || r.Status != domain.RunAwaitingApproval {
+		t.Fatalf("zero-value trust gave %+v", r)
+	}
+	// A fork is never trusted even if a caller claims it is.
+	r, err = h.svc.CreateRun(t.Context(), runs.NewRun{
+		OrgID: h.org.ID, ProjectID: h.project.ID, Event: domain.EventPullRequest, Ref: "refs/pull/5/head",
+		CommitSHA: strings.Repeat("b", 40), Pipeline: pl, Trusted: true, IsFork: true,
+	})
+	if err != nil || r.Trusted || r.Status != domain.RunAwaitingApproval {
+		t.Fatalf("trusted fork = %+v %v", r, err)
+	}
+}
+
+// TestCreateRun_OrgMustOwnProject: the composite foreign key rejects a run
+// filed under another org's project even if a caller mixes them up.
+func TestCreateRun_OrgMustOwnProject(t *testing.T) {
+	h := newHarness(t)
+	other := newHarness(t)
+	pl, _ := spec.Parse([]byte(pipelineYAML))
+	_, err := h.svc.CreateRun(t.Context(), runs.NewRun{
+		OrgID: h.org.ID, ProjectID: other.project.ID, Event: domain.EventPush, Ref: "refs/heads/main",
+		CommitSHA: strings.Repeat("b", 40), Pipeline: pl, Trusted: true,
+	})
+	if err == nil {
+		t.Fatal("run created under another org's project")
 	}
 }
 
@@ -220,6 +273,15 @@ func TestCreateRun_IdempotencyKeyReturnsSameRun(t *testing.T) {
 	b := h.create(runs.NewRun{Event: domain.EventManual, IdempotencyKey: "retry-1"})
 	if a.ID != b.ID {
 		t.Fatalf("idempotent create returned %s then %s", a.ID, b.ID)
+	}
+	// Reusing the key for a different request is rejected.
+	pl, _ := spec.Parse([]byte(pipelineYAML))
+	_, err := h.svc.CreateRun(t.Context(), runs.NewRun{
+		OrgID: h.org.ID, ProjectID: h.project.ID, Event: domain.EventManual, Ref: "refs/heads/main",
+		CommitSHA: strings.Repeat("f", 40), IdempotencyKey: "retry-1", Pipeline: pl, Trusted: true,
+	})
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("key reuse with another SHA err = %v", err)
 	}
 	// The same key in another project is independent.
 	c := h.create(runs.NewRun{OrgID: h.org.ID, ProjectID: h.other.ID, Event: domain.EventManual, Ref: "refs/heads/main", IdempotencyKey: "retry-1"})
@@ -236,6 +298,7 @@ func TestCreateRun_RejectsBadIdentifiers(t *testing.T) {
 		{CommitSHA: strings.Repeat("a", 40), Ref: "refs/heads/../x", Event: domain.EventPush},
 		{CommitSHA: strings.Repeat("a", 40), Ref: "refs/tags/v1", Event: domain.EventPush},
 		{CommitSHA: strings.Repeat("a", 40), Ref: "refs/heads/main", Event: "schedule"},
+		{CommitSHA: strings.Repeat("a", 40), Ref: "refs/pull/1/head", Event: domain.EventPullRequest, PRNumber: 1 << 31},
 	}
 	for _, nr := range cases {
 		nr.OrgID, nr.ProjectID, nr.Pipeline = h.org.ID, h.project.ID, pl

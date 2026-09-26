@@ -27,9 +27,13 @@ Origin, and CSRF model.
    with chunks of at most 256 KiB, already masked. The server checks the
    lease, then writes the chunk to object storage at
    `orgs/<org>/runs/<run>/jobs/<job>/<seq, zero-padded>` and records chunk
-   metadata (sequence, size, object key) — never content — in PostgreSQL.
-   Appends are idempotent per `(job, seq)`. A per-job cap (default 64 MiB)
-   truncates further output with a marker.
+   metadata (sequence, size, SHA-256 of the content, object key) — never
+   content — in PostgreSQL. Appends are idempotent per `(job, seq)`: a
+   replay with identical content is acknowledged, a replay with different
+   content is rejected. Sequence numbers must be contiguous from 0 and at
+   most 16 384 chunks are accepted per job, so tiny chunks cannot exhaust
+   metadata rows or object counts. A per-job cap (default 64 MiB) truncates
+   further output with a marker.
 
 2. **Object storage.** `internal/platform/objstore` with two backends:
    `fs` (a directory; the default and the `--embedded` backend, paths built
@@ -42,7 +46,9 @@ Origin, and CSRF model.
    finished" events per job: NATS (`nats.go`) when `KILN_NATS_URL` is set,
    otherwise an in-process implementation (single-replica and `--embedded`).
    Events carry IDs only; readers fetch chunk content from object storage, so
-   the bus never becomes a second log store.
+   the bus never becomes a second log store. NATS connections use TLS and
+   credentials (user/password or NKey from a file), and subjects are scoped
+   by org (`kiln.orgs.<org>.jobs.<job>.logs`).
 
 4. **Read path (B1).**
    - `GET …/jobs/{jobId}/logs` returns the stored log as

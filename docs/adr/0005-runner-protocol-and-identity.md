@@ -48,10 +48,15 @@ not give a stolen runner credential more than one runner's worth of access.
 
 4. **Renewal and revocation.** Runners call `RenewCertificate` (mTLS) with a
    new CSR after half the certificate lifetime. Every authenticated RPC loads
-   the runner row: a runner that is deleted (revoked) or whose certificate
-   serial is neither the current nor the immediately previous one is
-   rejected, so revocation takes effect on the next call rather than at
-   certificate expiry.
+   the runner row: a runner that is deleted (revoked) is rejected, so
+   revocation takes effect on the next call rather than at certificate
+   expiry. Only the **current** serial may renew. The immediately previous
+   serial is accepted for other calls for a short grace period (5 minutes)
+   after a renewal, so in-flight calls finish. A renewal attempt with any
+   non-current serial, or a second renewal within half a certificate
+   lifetime, is treated like refresh-token reuse: the runner is revoked and
+   the event is audited. Without that rule, an attacker holding a stolen key
+   could keep renewing alongside the real runner forever (security review).
 
 5. **Method policy (deny by default, invariant 9).** A gRPC interceptor maps
    every method to one rule: `Register` requires a registration token and no
@@ -82,9 +87,15 @@ not give a stolen runner credential more than one runner's worth of access.
    only (never renumber or reuse fields).
 
 9. **Trust levels.** Runners are `untrusted` (default) or `trusted`. A job is
-   eligible for a trusted runner only if its run is trusted (Phase 1: not
-   from a fork). Fork jobs never run on trusted runners (SS §8). Secrets and
-   cache scoping by trust level arrive in Phase 2.
+   eligible for a trusted runner only if its run is trusted; untrusted jobs
+   (fork PRs, and any run whose trust was not positively established) never
+   run on trusted runners (SS §8), enforced in the lease query and by a
+   database constraint that a job's trust equals its run's. Trusted jobs may
+   run on untrusted runners, but because an untrusted host may have been
+   poisoned by earlier fork jobs, **secrets are delivered only to trusted
+   runners** and deploy provenance (Phase 3) is accepted only from trusted
+   runners: a job that needs either is routed to trusted runners only
+   (Phase 2). Cache scoping by trust level also arrives in Phase 2.
 
 ## Consequences
 

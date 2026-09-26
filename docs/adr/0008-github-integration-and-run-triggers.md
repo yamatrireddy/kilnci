@@ -31,15 +31,25 @@ tenant's repositories (S2).
    (`/api/v1/admin/github-installations`, audited). Org admins can link a
    project only to a repository that belongs to one of *their* org's
    installations — verified live against GitHub — and each repository can be
-   linked to at most one project on the instance. Webhooks for unbound
-   installations or unlinked repositories are acknowledged and dropped.
+   linked to at most one project on the instance. Links are keyed by the
+   immutable numeric `(installation.id, repository.id)`, never by
+   `full_name`, so renamed, transferred, or re-created repositories cannot
+   inherit a link. Every webhook must match both the linked repository ID and
+   an installation bound to that project's org. `installation` (`deleted`,
+   `suspend`) and `installation_repositories` (`removed`) events disable the
+   affected links. Webhooks for unbound installations or unlinked
+   repositories are acknowledged and dropped.
 
 3. **Ingest (`POST /api/v1/webhooks/github`, public).**
    - Body limit 5 MiB; `X-Hub-Signature-256` HMAC-SHA256 over the raw body,
      compared with `hmac.Equal`, **before** any parsing.
-   - `X-GitHub-Delivery` is recorded with a unique constraint; a replayed
-     delivery ID is acknowledged without effect (T-01 replay control;
-     GitHub does not sign a timestamp).
+   - Replays are deduplicated twice, because GitHub signs only the body:
+     by `X-GitHub-Delivery` and by the SHA-256 of the raw body (unique), so
+     re-sending a captured signed body under a fresh delivery ID has no
+     effect. Run creation is additionally idempotent per (project, event,
+     head SHA, ref). Deduplication rows are kept for 90 days, and push
+     events whose head commit is older than 7 days are ignored (T-01; GitHub
+     does not sign a timestamp).
    - Only `push`, `pull_request` (`opened`, `synchronize`, `reopened`), and
      `ping` are accepted; the verified body is stored in a queue table and
      the handler returns `202`. A worker pool processes the queue
@@ -53,12 +63,19 @@ tenant's repositories (S2).
    validation errors, so authors see why. Developers can also start a run on
    a branch through the API (`Idempotency-Key` supported).
 
-5. **Trust and fork PRs (S1).** A PR is a fork PR when its head repository
-   differs from the base repository. Fork runs are **untrusted**: they never
+5. **Trust and fork PRs (S1).** A PR is a fork PR unless its
+   `head.repo.id` equals `base.repo.id` (numeric IDs); a missing or null head
+   repository (e.g. a deleted fork) counts as a fork. Trust is never
+   inferred: the service creates a run as untrusted unless the caller
+   positively asserts it is from the project's own repository (fail closed). Fork runs are **untrusted**: they never
    run on trusted runners, never receive secrets (Phase 2), and by default
    start in `awaiting_approval` until a developer of the org approves them
    (audited). Event fields (titles, branch names) are stored and shown as
-   untrusted text and reach jobs only as environment variables.
+   untrusted text, with control and invisible Unicode format characters
+   (bidi overrides, zero-width characters) replaced so the approver sees
+   what the text really says, and reach jobs only as environment variables.
+   A future policy may forbid approving one's own fork run once VCS logins
+   are linked to Kiln users.
 
 6. **Commit statuses.** On run state changes, a status (`pending`, `success`,
    `failure`, `error`) with context `kiln/<project slug>` and a link to the

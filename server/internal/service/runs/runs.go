@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -316,16 +317,47 @@ type NewRun struct {
 	CommitSHA        string
 	Title            string
 	PRNumber         int
-	IsFork           bool
-	ActorLogin       string
-	CreatedBy        string
-	IdempotencyKey   string
+	// Trusted must be set explicitly, and only when the change provably
+	// comes from the project's own repository (a push, a pull request whose
+	// head repository ID equals the base repository ID, or a developer's
+	// manual run). The zero value is untrusted: the run needs approval and
+	// never uses trusted runners (fail closed).
+	Trusted bool
+	// IsFork marks a pull request from another repository. A fork run is
+	// never trusted, whatever Trusted says.
+	IsFork         bool
+	ActorLogin     string
+	CreatedBy      string
+	IdempotencyKey string
 	// Pipeline is the parsed pipeline; nil when it could not be loaded, in
-	// which case LoadError explains why and the run is created failed.
-	Pipeline  *spec.Pipeline
-	LoadError string
-	// RequireApproval starts the run in awaiting_approval (fork PRs).
+	// which case PipelineErr says why and the run is created failed.
+	Pipeline    *spec.Pipeline
+	PipelineErr error
+	// RequireApproval starts even a trusted run in awaiting_approval.
 	RequireApproval bool
+}
+
+// ErrNoPipeline is the PipelineErr for a commit without .kiln/pipeline.yaml.
+var ErrNoPipeline = errors.New("no pipeline file")
+
+// pipelineErrorText turns a load failure into text safe to show every viewer
+// of the run: validation problems (which never echo document values) or a
+// fixed message. Raw errors (which could carry internal URLs or response
+// bodies) are never stored.
+func pipelineErrorText(err error) string {
+	var pe *spec.Error
+	switch {
+	case errors.As(err, &pe):
+		parts := make([]string, len(pe.Problems))
+		for i, p := range pe.Problems {
+			parts[i] = p.String()
+		}
+		return "invalid pipeline: " + strings.Join(parts, "; ")
+	case errors.Is(err, ErrNoPipeline):
+		return "no " + spec.Path + " in this commit"
+	default:
+		return "the pipeline could not be loaded"
+	}
 }
 
 var (
@@ -355,19 +387,23 @@ func (s *Service) CreateRun(ctx context.Context, nr NewRun) (domain.Run, error) 
 	default:
 		return domain.Run{}, domain.NewValidationError("event", "is not a supported event")
 	}
-	if nr.PRNumber < 0 || (nr.Pipeline == nil && nr.LoadError == "") {
+	if nr.PRNumber < 0 || nr.PRNumber > math.MaxInt32 {
+		return domain.Run{}, domain.NewValidationError("prNumber", "is out of range")
+	}
+	if nr.Pipeline == nil && nr.PipelineErr == nil {
 		return domain.Run{}, domain.NewValidationError("pipeline", "is required")
 	}
+	trusted := nr.Trusted && !nr.IsFork
 	now := s.now().UTC()
 	run := domain.Run{
 		ID: s.ids.New(), OrgID: nr.OrgID, ProjectID: nr.ProjectID, Event: nr.Event, Ref: nr.Ref,
 		Branch: clean(nr.Branch, maxShortBytes), CommitSHA: nr.CommitSHA, Title: clean(nr.Title, maxTitleBytes),
-		PRNumber: nr.PRNumber, IsFork: nr.IsFork, Trusted: !nr.IsFork, ActorLogin: clean(nr.ActorLogin, maxShortBytes),
+		PRNumber: nr.PRNumber, IsFork: nr.IsFork, Trusted: trusted, ActorLogin: clean(nr.ActorLogin, maxShortBytes),
 		CreatedBy: nr.CreatedBy, IdempotencyKey: nr.IdempotencyKey, CreatedAt: now,
-		Status: engine.InitialRunStatus(nr.RequireApproval || nr.IsFork, nr.Pipeline != nil),
+		Status: engine.InitialRunStatus(nr.RequireApproval || !trusted, nr.Pipeline != nil),
 	}
 	if nr.Pipeline == nil {
-		run.Error = truncate(nr.LoadError, maxErrorBytes)
+		run.Error = truncate(pipelineErrorText(nr.PipelineErr), maxErrorBytes)
 		run.FinishedAt = &now
 	}
 	if !engine.ValidInitialRunStatus(run.Status) {
@@ -378,6 +414,11 @@ func (s *Service) CreateRun(ctx context.Context, nr NewRun) (domain.Run, error) 
 		if nr.IdempotencyKey != "" {
 			existing, err := s.store.GetRunByIdempotencyKey(ctx, nr.OrgID, nr.ProjectID, nr.IdempotencyKey)
 			if err == nil {
+				// Replaying a key is only valid for the same request.
+				if existing.Event != run.Event || existing.Ref != run.Ref || existing.CommitSHA != run.CommitSHA ||
+					existing.CreatedBy != run.CreatedBy {
+					return domain.NewValidationError("Idempotency-Key", "was already used for a different request")
+				}
 				run = existing
 				return nil
 			}
@@ -462,21 +503,28 @@ func mergeEnv(base, over []spec.EnvVar) []domain.EnvVar {
 // UTF-8 and control characters are replaced, only the first line is kept,
 // and the result is truncated on a rune boundary.
 func clean(s string, maxBytes int) string {
-	s = strings.ToValidUTF8(s, "�")
+	s = strings.ToValidUTF8(s, string(utf8.RuneError))
 	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
 		s = s[:i]
 	}
 	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return '�'
+		if isUnsafeRune(r) {
+			return utf8.RuneError
 		}
 		return r
 	}, s)
 	return truncate(strings.TrimSpace(s), maxBytes)
 }
 
+// isUnsafeRune reports control characters and invisible format characters
+// (bidi overrides, zero-width joiners, soft hyphens, line separators) that
+// can make untrusted text display differently from what it says.
+func isUnsafeRune(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
 func truncate(s string, maxBytes int) string {
-	s = strings.ToValidUTF8(s, "�")
+	s = strings.ToValidUTF8(s, string(utf8.RuneError))
 	if len(s) <= maxBytes {
 		return s
 	}

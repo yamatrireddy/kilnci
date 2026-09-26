@@ -35,12 +35,22 @@ default, and blocked for fork PRs. Phase 1 ships one executor: Docker.
 3. **Workspace.** A per-job named volume is mounted at `/workspace`. It is
    populated by a clone container (a pinned `alpine/git` image digest,
    same hardening, running as the same UID) that fetches exactly the run's
-   commit SHA. A short-lived, read-only repository credential (if any) is
-   passed only to the clone container, never to the job container. The
-   volume, containers, and network are removed when the job ends, whatever
-   the outcome (T-23).
+   commit SHA (`git fetch --depth=1 origin <sha>`; refs and branch names are
+   never passed to git, and every argument list ends options with `--`).
+   A short-lived, read-only repository credential (if any) reaches only the
+   clone container, and only as an `http.extraHeader` supplied through
+   `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` environment
+   variables for that single fetch: never in the remote URL, never through a
+   credential helper, never written to `.git/config`, and without submodule
+   recursion. Pipeline `env` never reaches the clone container (it could set
+   `GIT_*` variables). Before the job container starts, the runner scans the
+   volume for the credential and fails the job closed if it appears anywhere
+   (security review). The volume, containers, and network are removed when
+   the job ends, whatever the outcome (T-23).
 
-4. **Images.** The runner pulls with the default registry settings. Digest
+4. **Images.** Untrusted jobs pull anonymously, so a fork PR cannot use the
+   runner host's registry credentials to pull an org's private images;
+   trusted jobs may use the runner's configured registry credentials. Digest
    pinning and plugin capabilities are Phase 4 (T-25).
 
 5. **Masking (T-27).** The runner masks every sensitive value it knows (the

@@ -85,7 +85,7 @@ func (f *fixture) newRun(fork bool) string {
 	run, err := f.env.runs.CreateRun(f.env.t.Context(), runs.NewRun{
 		OrgID: f.orgID, ProjectID: f.projectID, Event: domain.EventPullRequest, Ref: "refs/pull/7/head",
 		Branch: "feature", CommitSHA: strings.Repeat("ab", 20), Title: "Add feature", PRNumber: 7,
-		IsFork: fork, ActorLogin: "octocat", Pipeline: pl,
+		IsFork: fork, Trusted: !fork, ActorLogin: "octocat", Pipeline: pl,
 	})
 	if err != nil {
 		f.env.t.Fatal(err)

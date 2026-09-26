@@ -38,10 +38,14 @@ func (s *Store) NextRunNumber(ctx context.Context, orgID, projectID string) (int
 
 // CreateRun inserts a run. domain.ErrConflict on a duplicate idempotency key.
 func (s *Store) CreateRun(ctx context.Context, r domain.Run) (domain.Run, error) {
+	pr, err := int32Of("prNumber", int64(r.PRNumber))
+	if err != nil {
+		return domain.Run{}, err
+	}
 	row, err := s.q(ctx).CreateRun(ctx, db.CreateRunParams{
 		ID: r.ID, OrgID: r.OrgID, ProjectID: r.ProjectID, Number: r.Number, Status: string(r.Status),
 		Event: string(r.Event), Ref: r.Ref, Branch: r.Branch, CommitSha: r.CommitSHA, Title: r.Title,
-		PrNumber: int32(r.PRNumber), IsFork: r.IsFork, Trusted: r.Trusted, ActorLogin: r.ActorLogin, //nolint:gosec // bounded by validation
+		PrNumber: pr, IsFork: r.IsFork, Trusted: r.Trusted, ActorLogin: r.ActorLogin,
 		CreatedBy: nilIfEmpty(r.CreatedBy), IdempotencyKey: nilIfEmpty(r.IdempotencyKey), Error: r.Error,
 		CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
 	})
@@ -115,11 +119,22 @@ func (s *Store) CreateJob(ctx context.Context, j domain.Job) error {
 	if err != nil {
 		return fmt.Errorf("marshal env: %w", err)
 	}
+	timeout, err := int32Of("timeout", int64(j.Timeout/time.Second))
+	if err != nil {
+		return err
+	}
+	attempt, err := int32Of("attempt", int64(j.Attempt))
+	if err != nil {
+		return err
+	}
+	maxAttempts, err := int32Of("maxAttempts", int64(j.MaxAttempts))
+	if err != nil {
+		return err
+	}
 	return mapErr("create job", s.q(ctx).CreateJob(ctx, db.CreateJobParams{
 		ID: j.ID, OrgID: j.OrgID, RunID: j.RunID, Name: j.Name, Status: string(j.Status),
 		Needs: nonNil(j.Needs), Image: j.Image, Labels: nonNil(j.Labels), Steps: steps, Env: envJSON,
-		TimeoutSeconds: int32(j.Timeout / time.Second), Attempt: int32(j.Attempt), //nolint:gosec // bounded by the spec
-		MaxAttempts: int32(j.MaxAttempts), Trusted: j.Trusted, CreatedAt: j.CreatedAt, //nolint:gosec // bounded by the spec
+		TimeoutSeconds: timeout, Attempt: attempt, MaxAttempts: maxAttempts, Trusted: j.Trusted, CreatedAt: j.CreatedAt,
 	}))
 }
 
@@ -138,26 +153,34 @@ func (s *Store) ListJobs(ctx context.Context, orgID, runID string) ([]domain.Job
 	}
 	out := make([]domain.Job, len(rows))
 	for i, r := range rows {
-		j := domain.Job{
-			ID: r.ID, OrgID: r.OrgID, RunID: r.RunID, Name: r.Name, Status: domain.JobStatus(r.Status),
-			Needs: r.Needs, Image: r.Image, Labels: r.Labels, Timeout: time.Duration(r.TimeoutSeconds) * time.Second,
-			Attempt: int(r.Attempt), MaxAttempts: int(r.MaxAttempts), Trusted: r.Trusted, RunnerID: deref(r.RunnerID),
-			CancelRequested: r.CancelRequested, FailureReason: r.FailureReason, CreatedAt: r.CreatedAt,
-			QueuedAt: r.QueuedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
-		}
-		if r.ExitCode != nil {
-			c := int(*r.ExitCode)
-			j.ExitCode = &c
-		}
-		if err := json.Unmarshal(r.Steps, &j.Steps); err != nil {
-			return nil, fmt.Errorf("decode job steps: %w", err)
-		}
-		if err := json.Unmarshal(r.Env, &j.Env); err != nil {
-			return nil, fmt.Errorf("decode job env: %w", err)
+		j, err := toJob(r)
+		if err != nil {
+			return nil, err
 		}
 		out[i] = j
 	}
 	return out, nil
+}
+
+func toJob(r db.ListJobsRow) (domain.Job, error) {
+	j := domain.Job{
+		ID: r.ID, OrgID: r.OrgID, RunID: r.RunID, Name: r.Name, Status: domain.JobStatus(r.Status),
+		Needs: r.Needs, Image: r.Image, Labels: r.Labels, Timeout: time.Duration(r.TimeoutSeconds) * time.Second,
+		Attempt: int(r.Attempt), MaxAttempts: int(r.MaxAttempts), Trusted: r.Trusted, RunnerID: deref(r.RunnerID),
+		CancelRequested: r.CancelRequested, FailureReason: r.FailureReason, CreatedAt: r.CreatedAt,
+		QueuedAt: r.QueuedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
+	}
+	if r.ExitCode != nil {
+		c := int(*r.ExitCode)
+		j.ExitCode = &c
+	}
+	if err := json.Unmarshal(r.Steps, &j.Steps); err != nil {
+		return domain.Job{}, fmt.Errorf("decode job steps: %w", err)
+	}
+	if err := json.Unmarshal(r.Env, &j.Env); err != nil {
+		return domain.Job{}, fmt.Errorf("decode job env: %w", err)
+	}
+	return j, nil
 }
 
 // JobStatusChange is a compare-and-swap of a job's status for jobs that are
