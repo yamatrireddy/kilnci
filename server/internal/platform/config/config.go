@@ -59,6 +59,8 @@ type Config struct {
 	Web      Web
 	Tracing  Tracing
 	Runner   Runner
+	Logs     Logs
+	NATS     NATS
 }
 
 // HTTP configures the listener and HTTP behavior.
@@ -147,6 +149,38 @@ type Runner struct {
 // Enabled reports whether the runner listener is configured.
 func (r Runner) Enabled() bool { return r.CADir != "" }
 
+// Logs configures job log storage (ADR-0007).
+type Logs struct {
+	// Store is "fs" (a local directory) or "s3".
+	Store string
+	// Dir is the fs store's directory.
+	Dir      string
+	MaxBytes int64
+	S3       S3
+}
+
+// S3 configures an S3-compatible bucket.
+type S3 struct {
+	Endpoint  string
+	Bucket    string
+	Region    string
+	Prefix    string
+	AccessKey string
+	SecretKey Secret
+	UseTLS    bool
+}
+
+// NATS configures the live notification bus. Empty URL uses an in-process
+// bus (single replica or --embedded).
+type NATS struct {
+	URL       string
+	CredsFile string
+	User      string
+	Password  Secret
+	// Insecure disables TLS (development only).
+	Insecure bool
+}
+
 // Tracing configures OpenTelemetry export.
 type Tracing struct {
 	// OTLPEndpoint (host:port) enables OTLP/HTTP trace export when set.
@@ -218,6 +252,27 @@ func Load(src Source, embedded bool) (*Config, error) {
 	c.Runner.Addr = p.str("KILN_RUNNER_ADDR", ":9443")
 	c.Runner.CADir = p.str("KILN_RUNNER_CA_DIR", "")
 	c.Runner.Hostnames = lower(p.list("KILN_RUNNER_HOSTNAMES"))
+
+	c.Logs.Store = p.str("KILN_LOG_STORE", "fs")
+	defaultLogDir := ""
+	if isDev {
+		defaultLogDir = "data/logs"
+	}
+	c.Logs.Dir = p.str("KILN_LOG_DIR", defaultLogDir)
+	c.Logs.MaxBytes = p.int64("KILN_LOG_MAX_BYTES", 64<<20)
+	c.Logs.S3.Endpoint = p.str("KILN_S3_ENDPOINT", "")
+	c.Logs.S3.Bucket = p.str("KILN_S3_BUCKET", "")
+	c.Logs.S3.Region = p.str("KILN_S3_REGION", "")
+	c.Logs.S3.Prefix = p.str("KILN_S3_PREFIX", "")
+	c.Logs.S3.AccessKey = p.str("KILN_S3_ACCESS_KEY_ID", "")
+	c.Logs.S3.SecretKey = p.secret("KILN_S3_SECRET_ACCESS_KEY")
+	c.Logs.S3.UseTLS = p.bool("KILN_S3_USE_TLS", true)
+
+	c.NATS.URL = p.str("KILN_NATS_URL", "")
+	c.NATS.CredsFile = p.str("KILN_NATS_CREDS_FILE", "")
+	c.NATS.User = p.str("KILN_NATS_USER", "")
+	c.NATS.Password = p.secret("KILN_NATS_PASSWORD")
+	c.NATS.Insecure = p.bool("KILN_NATS_INSECURE", false)
 
 	c.Tracing.OTLPEndpoint = p.str("KILN_OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	c.Tracing.Insecure = p.bool("KILN_OTEL_EXPORTER_OTLP_INSECURE", false)
@@ -327,6 +382,36 @@ func (c *Config) validate() []error {
 	}
 	if c.Auth.DesktopRefreshTokenTTL <= 0 || c.Auth.DesktopRefreshTokenTTL > 90*24*time.Hour {
 		add("KILN_DESKTOP_REFRESH_TOKEN_TTL must be between 1s and 2160h")
+	}
+
+	switch c.Logs.Store {
+	case "fs":
+		if c.Logs.Dir == "" {
+			add("KILN_LOG_DIR is required when KILN_LOG_STORE=fs (a directory outside the database host's backups is recommended)")
+		}
+	case "s3":
+		if c.Logs.S3.Endpoint == "" || c.Logs.S3.Bucket == "" || c.Logs.S3.AccessKey == "" || c.Logs.S3.SecretKey.IsZero() {
+			add("KILN_S3_ENDPOINT, KILN_S3_BUCKET, KILN_S3_ACCESS_KEY_ID and KILN_S3_SECRET_ACCESS_KEY are required when KILN_LOG_STORE=s3")
+		}
+		if strings.Contains(c.Logs.S3.Endpoint, "/") {
+			add("KILN_S3_ENDPOINT must be host[:port] without a scheme")
+		}
+		if !c.Logs.S3.UseTLS && !c.IsDevelopment() {
+			add("KILN_S3_USE_TLS=false is allowed only with KILN_ENV=development")
+		}
+	default:
+		add("KILN_LOG_STORE must be fs or s3")
+	}
+	if c.Logs.MaxBytes < 1<<20 || c.Logs.MaxBytes > 1<<30 {
+		add("KILN_LOG_MAX_BYTES must be between 1 MiB and 1 GiB")
+	}
+	if c.NATS.URL != "" {
+		if u, err := url.Parse(c.NATS.URL); err != nil || (u.Scheme != "nats" && u.Scheme != "tls") || u.User != nil {
+			add("KILN_NATS_URL must be nats:// or tls:// without credentials (use KILN_NATS_CREDS_FILE or KILN_NATS_USER/PASSWORD)")
+		}
+		if c.NATS.Insecure && !c.IsDevelopment() {
+			add("KILN_NATS_INSECURE is allowed only with KILN_ENV=development")
+		}
 	}
 
 	if c.Runner.Enabled() {

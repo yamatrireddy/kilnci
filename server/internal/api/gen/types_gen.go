@@ -78,6 +78,7 @@ func (e JobStatus) Valid() bool {
 // Defines values for Permission.
 const (
 	AuditRead     Permission = "audit:read"
+	LogsRead      Permission = "logs:read"
 	MembersList   Permission = "members:list"
 	OrgsList      Permission = "orgs:list"
 	OrgsRead      Permission = "orgs:read"
@@ -93,6 +94,8 @@ const (
 func (e Permission) Valid() bool {
 	switch e {
 	case AuditRead:
+		return true
+	case LogsRead:
 		return true
 	case MembersList:
 		return true
@@ -772,6 +775,11 @@ type ListRunsParams struct {
 	// Cursor Opaque cursor from a previous page's `nextCursor`.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// StreamJobLogParams defines parameters for StreamJobLog.
+type StreamJobLogParams struct {
+	LastEventID *int `json:"Last-Event-ID,omitempty"`
 }
 
 // ListRunnersParams defines parameters for ListRunners.

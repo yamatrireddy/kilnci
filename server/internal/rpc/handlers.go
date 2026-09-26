@@ -35,6 +35,12 @@ type Scheduler interface {
 	Release(ctx context.Context, r scheduler.Runner, jobID string, leaseID []byte) error
 }
 
+// LogSink stores job output (internal/service/logs).
+type LogSink interface {
+	Append(ctx context.Context, r scheduler.Runner, jobID string, leaseID []byte, seq int, data []byte) (bool, error)
+	Notify(ctx context.Context, orgID, jobID string)
+}
+
 // Checkout says where a run's code comes from and with which short-lived
 // credential (empty for public repositories).
 type Checkout struct {
@@ -237,5 +243,16 @@ func (h *handlers) CompleteJob(ctx context.Context, req *runnerv1.CompleteJobReq
 	if err := h.svc.Scheduler.Complete(ctx, runner, req.GetJobId(), req.GetLeaseId(), res); err != nil {
 		return nil, h.toStatus(ctx, runnerv1.RunnerService_CompleteJob_FullMethodName, err)
 	}
+	// Wake live log readers so their streams end promptly.
+	h.svc.Logs.Notify(ctx, runner.OrgID, req.GetJobId())
 	return &runnerv1.CompleteJobResponse{}, nil
+}
+
+func (h *handlers) AppendLogs(ctx context.Context, req *runnerv1.AppendLogsRequest) (*runnerv1.AppendLogsResponse, error) {
+	runner, _ := runnerFrom(ctx)
+	truncated, err := h.svc.Logs.Append(ctx, runner, req.GetJobId(), req.GetLeaseId(), int(req.GetSeq()), req.GetData())
+	if err != nil {
+		return nil, h.toStatus(ctx, runnerv1.RunnerService_AppendLogs_FullMethodName, err)
+	}
+	return &runnerv1.AppendLogsResponse{Truncated: truncated}, nil
 }

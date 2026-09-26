@@ -26,12 +26,15 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/auth/authz"
 	"github.com/yamatrireddy/kilnci/server/internal/domain"
 	"github.com/yamatrireddy/kilnci/server/internal/engine/spec"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/bus"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/ids"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/logging"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/objstore"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/pki"
 	"github.com/yamatrireddy/kilnci/server/internal/rpc"
 	"github.com/yamatrireddy/kilnci/server/internal/scheduler"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
+	"github.com/yamatrireddy/kilnci/server/internal/service/logs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
 	"github.com/yamatrireddy/kilnci/server/internal/store/storetest"
@@ -56,6 +59,7 @@ func (c *clock) set(t time.Time) {
 
 type env struct {
 	t        *testing.T
+	logs     *logs.Service
 	addr     string
 	ca       *pki.CA
 	clk      *clock
@@ -89,7 +93,13 @@ func newEnv(t *testing.T) *env {
 	runnerSvc := runners.NewService(st, az, rec, ca, gen, clk.now)
 	runSvc := runs.NewService(st, az, rec, sched.Progressor(), gen, clk.now)
 
-	srv, err := rpc.New(logging.Discard(), rpc.Services{Runners: runnerSvc, Scheduler: sched},
+	obj, err := objstore.NewFS(t.TempDir() + "/logs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = obj.Close() })
+	logSvc := logs.NewService(st, az, obj, bus.NewInProcess(), logs.Options{}, clk.now)
+	srv, err := rpc.New(logging.Discard(), rpc.Services{Runners: runnerSvc, Scheduler: sched, Logs: logSvc},
 		rpc.Options{CA: ca, Hostnames: []string{"127.0.0.1"}, LeaseWait: 300 * time.Millisecond, LeasePoll: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +135,7 @@ func newEnv(t *testing.T) *env {
 	if err := st.AddMembership(ctx, domain.Membership{OrgID: org.ID, UserID: u.ID, Role: domain.RoleAdmin}, clk.now()); err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, addr: lis.Addr().String(), ca: ca, clk: clk, runners: runnerSvc, runs: runSvc, recorder: rec, org: org, project: proj,
+	return &env{t: t, logs: logSvc, addr: lis.Addr().String(), ca: ca, clk: clk, runners: runnerSvc, runs: runSvc, recorder: rec, org: org, project: proj,
 		admin: &authz.Principal{Kind: authz.KindUser, Method: authz.MethodSession, UserID: u.ID}}
 }
 
@@ -241,6 +251,25 @@ func TestRunnerProtocol_EndToEnd(t *testing.T) {
 		env["KILN_BRANCH"] != "main" || env["KILN_IS_FORK"] != "false" || env["A"] != "b" || env["CI"] != "true" ||
 		job.GetCheckout().GetCommitSha() != run.CommitSHA || !job.GetTrusted() {
 		t.Fatalf("job = %+v", job)
+	}
+	for i, chunk := range []string{"==> Step 1/1: Build\n", "ok\n"} {
+		if _, err := client.AppendLogs(ctx, &runnerv1.AppendLogsRequest{ProtocolVersion: v1, JobId: job.GetJobId(), LeaseId: job.GetLeaseId(),
+			Seq: uint32(i), Data: []byte(chunk)}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if _, err := client.AppendLogs(ctx, &runnerv1.AppendLogsRequest{ProtocolVersion: v1, JobId: job.GetJobId(), LeaseId: job.GetLeaseId(),
+		Seq: 1, Data: []byte("tampered\n")}); code(err) != codes.Aborted {
+		t.Fatalf("conflicting replay = %v", err)
+	}
+	if _, err := anon.AppendLogs(ctx, &runnerv1.AppendLogsRequest{ProtocolVersion: v1, JobId: job.GetJobId(), LeaseId: job.GetLeaseId(),
+		Seq: 2, Data: []byte("x")}); code(err) != codes.Unauthenticated {
+		t.Fatalf("anonymous append = %v", err)
+	}
+	var logBuf strings.Builder
+	if err := e.logs.Read(authz.WithPrincipal(ctx, e.admin), logs.JobRef{OrgSlug: e.org.Slug, ProjectSlug: e.project.Slug,
+		RunID: run.ID, JobID: job.GetJobId()}, &logBuf); err != nil || logBuf.String() != "==> Step 1/1: Build\nok\n" {
+		t.Fatalf("stored log = %q %v", logBuf.String(), err)
 	}
 	hb, err := client.Heartbeat(ctx, &runnerv1.HeartbeatRequest{ProtocolVersion: v1, JobId: job.GetJobId(), LeaseId: job.GetLeaseId()})
 	if err != nil || hb.GetCancel() {

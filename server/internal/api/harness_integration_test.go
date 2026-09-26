@@ -18,11 +18,14 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/auth"
 	"github.com/yamatrireddy/kilnci/server/internal/auth/authtest"
 	"github.com/yamatrireddy/kilnci/server/internal/auth/authz"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/bus"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/ids"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/logging"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/objstore"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/pki"
 	"github.com/yamatrireddy/kilnci/server/internal/scheduler"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
+	"github.com/yamatrireddy/kilnci/server/internal/service/logs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
@@ -59,6 +62,7 @@ type env struct {
 	recorder *audit.Recorder
 	runs     *runs.Service
 	runners  *runners.Service
+	logs     *logs.Service
 	clock    *clock
 	// bootstrap is the instance admin's email for this env.
 	bootstrap string
@@ -94,8 +98,14 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	runnerSvc := runners.NewService(st, az, rec, ca, gen, clk.now)
+	obj, err := objstore.NewFS(t.TempDir() + "/logs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = obj.Close() })
+	logSvc := logs.NewService(st, az, obj, bus.NewInProcess(), logs.Options{StreamPoll: 50 * time.Millisecond, MaxStream: 300 * time.Millisecond}, clk.now)
 	h, rt, err := api.NewHandler(api.Deps{
-		Log: logging.Discard(), IDs: gen, Authn: authSvc, Auth: authSvc, Orgs: orgSvc, Runs: runSvc, Runners: runnerSvc,
+		Log: logging.Discard(), IDs: gen, Authn: authSvc, Auth: authSvc, Orgs: orgSvc, Runs: runSvc, Runners: runnerSvc, Logs: logSvc,
 		Options: api.Options{
 			MaxBodyBytes: 1 << 20,
 			HSTS:         true,
@@ -105,7 +115,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, h: h, rt: rt, st: st, idp: idp, recorder: rec, runs: runSvc, runners: runnerSvc, clock: clk, bootstrap: bootstrap, keys: map[string]string{}}
+	return &env{t: t, h: h, rt: rt, st: st, idp: idp, recorder: rec, runs: runSvc, runners: runnerSvc, logs: logSvc, clock: clk, bootstrap: bootstrap, keys: map[string]string{}}
 }
 
 // client is one caller: anonymous, a browser session, or a bearer token.

@@ -547,6 +547,74 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/Internal" }
 
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+      - name: jobId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    get:
+      tags: [runs]
+      operationId: getJobLog
+      summary: A job's stored log (masked by the runner)
+      description: |
+        Raw bytes as the job wrote them (ANSI escapes included). Clients must
+        render them through the sanitizing log viewer, never as HTML. Served
+        with `Content-Security-Policy: sandbox` and `nosniff` (ADR-0007).
+      x-kiln-permission: logs:read
+      responses:
+        "200":
+          description: The log
+          content:
+            text/plain:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs/stream:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+      - name: jobId
+        in: path
+        required: true
+        schema: { $ref: "#/components/schemas/ID" }
+    get:
+      tags: [runs]
+      operationId: streamJobLog
+      summary: Live log tail as Server-Sent Events (ADR-0007)
+      description: |
+        Replays stored chunks after `Last-Event-ID`, then follows new ones
+        until the job finishes. `chunk` events carry `{"seq":n,"data":"<base64>"}`;
+        a final `end` event carries `{"status":"<job status>"}`. Streams
+        close after 30 minutes; reconnect with `Last-Event-ID`.
+      x-kiln-permission: logs:read
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: integer, minimum: 0, maximum: 16383 }
+      responses:
+        "200":
+          description: An event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
   /api/v1/pipelines/lint:
     post:
       tags: [pipelines]
@@ -839,6 +907,7 @@ components:
         - runs:list
         - runs:read
         - pipelines:lint
+        - logs:read
       description: Actions an API token may be scoped to (read-only).
 
     Health:

@@ -31,6 +31,7 @@ const (
 	RunnerService_Lease_FullMethodName            = "/kiln.runner.v1.RunnerService/Lease"
 	RunnerService_Heartbeat_FullMethodName        = "/kiln.runner.v1.RunnerService/Heartbeat"
 	RunnerService_CompleteJob_FullMethodName      = "/kiln.runner.v1.RunnerService/CompleteJob"
+	RunnerService_AppendLogs_FullMethodName       = "/kiln.runner.v1.RunnerService/AppendLogs"
 )
 
 // RunnerServiceClient is the client API for RunnerService service.
@@ -51,6 +52,10 @@ type RunnerServiceClient interface {
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 	// CompleteJob reports a leased job's result and releases the lease.
 	CompleteJob(ctx context.Context, in *CompleteJobRequest, opts ...grpc.CallOption) (*CompleteJobResponse, error)
+	// AppendLogs uploads the next chunk of a leased job's (masked) output
+	// (ADR-0007). Chunks are numbered from 0 with no gaps; resending a chunk
+	// with identical content is acknowledged, different content is rejected.
+	AppendLogs(ctx context.Context, in *AppendLogsRequest, opts ...grpc.CallOption) (*AppendLogsResponse, error)
 }
 
 type runnerServiceClient struct {
@@ -111,6 +116,16 @@ func (c *runnerServiceClient) CompleteJob(ctx context.Context, in *CompleteJobRe
 	return out, nil
 }
 
+func (c *runnerServiceClient) AppendLogs(ctx context.Context, in *AppendLogsRequest, opts ...grpc.CallOption) (*AppendLogsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppendLogsResponse)
+	err := c.cc.Invoke(ctx, RunnerService_AppendLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RunnerServiceServer is the server API for RunnerService service.
 // All implementations must embed UnimplementedRunnerServiceServer
 // for forward compatibility.
@@ -129,6 +144,10 @@ type RunnerServiceServer interface {
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	// CompleteJob reports a leased job's result and releases the lease.
 	CompleteJob(context.Context, *CompleteJobRequest) (*CompleteJobResponse, error)
+	// AppendLogs uploads the next chunk of a leased job's (masked) output
+	// (ADR-0007). Chunks are numbered from 0 with no gaps; resending a chunk
+	// with identical content is acknowledged, different content is rejected.
+	AppendLogs(context.Context, *AppendLogsRequest) (*AppendLogsResponse, error)
 	mustEmbedUnimplementedRunnerServiceServer()
 }
 
@@ -153,6 +172,9 @@ func (UnimplementedRunnerServiceServer) Heartbeat(context.Context, *HeartbeatReq
 }
 func (UnimplementedRunnerServiceServer) CompleteJob(context.Context, *CompleteJobRequest) (*CompleteJobResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteJob not implemented")
+}
+func (UnimplementedRunnerServiceServer) AppendLogs(context.Context, *AppendLogsRequest) (*AppendLogsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AppendLogs not implemented")
 }
 func (UnimplementedRunnerServiceServer) mustEmbedUnimplementedRunnerServiceServer() {}
 func (UnimplementedRunnerServiceServer) testEmbeddedByValue()                       {}
@@ -265,6 +287,24 @@ func _RunnerService_CompleteJob_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RunnerService_AppendLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppendLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RunnerServiceServer).AppendLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RunnerService_AppendLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RunnerServiceServer).AppendLogs(ctx, req.(*AppendLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RunnerService_ServiceDesc is the grpc.ServiceDesc for RunnerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -291,6 +331,10 @@ var RunnerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteJob",
 			Handler:    _RunnerService_CompleteJob_Handler,
+		},
+		{
+			MethodName: "AppendLogs",
+			Handler:    _RunnerService_AppendLogs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

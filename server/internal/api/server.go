@@ -36,6 +36,7 @@ type Deps struct {
 	Orgs    OrgService
 	Runs    RunService
 	Runners RunnerService
+	Logs    LogService
 	Checks  map[string]ReadinessCheck
 	Options Options
 }
@@ -49,6 +50,8 @@ type server struct {
 	orgs    OrgService
 	runs    RunService
 	runners RunnerService
+	logs    LogService
+	streams streamLimiter
 }
 
 // NewHandler builds the complete, validated HTTP handler. It returns an error
@@ -69,6 +72,7 @@ func NewHandler(d Deps) (http.Handler, *Router, error) {
 		orgs:    d.Orgs,
 		runs:    d.Runs,
 		runners: d.Runners,
+		logs:    d.Logs,
 	}
 
 	spec, err := loadSpec()
@@ -157,6 +161,11 @@ func (s *server) register(rt *Router) {
 		rt.Handle(post, runPath+"/{runId}/cancel", authz.ActionRunsCancel, s.runDetail(func(s *server) runAction { return s.runs.CancelRun }))
 		rt.Handle(post, runPath+"/{runId}/approve", authz.ActionRunsApprove, s.runDetail(func(s *server) runAction { return s.runs.ApproveRun }))
 		rt.Handle(post, "/api/v1/pipelines/lint", authz.ActionPipelinesLint, s.lintPipeline)
+	}
+	if s.logs != nil {
+		const jobPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}"
+		rt.Handle(get, jobPath+"/logs", authz.ActionLogsRead, s.getJobLog)
+		rt.Handle(get, jobPath+"/logs/stream", authz.ActionLogsRead, s.streamJobLog)
 	}
 	if s.runners != nil {
 		rt.Handle(get, "/api/v1/orgs/{orgSlug}/runners", authz.ActionRunnersList, s.listRunners)

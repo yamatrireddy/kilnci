@@ -32,6 +32,7 @@ type fixture struct {
 	orgID     string
 	projectID string
 	runID     string
+	jobID     string
 	actors    map[string]*client
 }
 
@@ -65,7 +66,7 @@ func newFixture(t *testing.T) *fixture {
 	f.actors[outsider] = invite(orgB, "owner")
 
 	rec := e.do(root, http.MethodPost, "/api/v1/tokens",
-		`{"name":"ci","scopes":["session:read","orgs:list","orgs:read","members:list","projects:list","projects:read","audit:read","runs:list","runs:read","pipelines:lint"],"expiresInDays":30}`)
+		`{"name":"ci","scopes":["session:read","orgs:list","orgs:read","members:list","projects:list","projects:read","audit:read","runs:list","runs:read","pipelines:lint","logs:read"],"expiresInDays":30}`)
 	e.mustStatus(rec, http.StatusCreated)
 	f.actors[token] = &client{bearer: decode[struct {
 		Token string `json:"token"`
@@ -144,6 +145,11 @@ func static(path, body string) func(*fixture) (string, string) {
 func TestAuthzMatrix(t *testing.T) {
 	f := newFixture(t)
 	f.runID = f.newRun(false)
+	jobs, err := f.env.st.ListJobs(t.Context(), f.orgID, f.runID)
+	if err != nil || len(jobs) == 0 {
+		t.Fatalf("jobs: %v", err)
+	}
+	f.jobID = jobs[0].ID
 	org := func(suffix string) string { return "/api/v1/orgs/" + f.org + suffix }
 
 	cases := []matrixCase{
@@ -189,6 +195,12 @@ func TestAuthzMatrix(t *testing.T) {
 		{"POST", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/approve", func(f *fixture) (string, string) {
 			return org("/projects/" + f.project + "/runs/" + f.newRun(true) + "/approve"), ""
 		}, statuses(200, 200, 200, 403, 404, 401, 403)},
+		{"GET", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/runs/" + f.runID + "/jobs/" + f.jobID + "/logs"), ""
+		}, statuses(200, 200, 200, 200, 404, 401, 200)},
+		{"GET", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs/stream", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/runs/" + f.runID + "/jobs/" + f.jobID + "/logs/stream"), ""
+		}, statuses(200, 200, 200, 200, 404, 401, 200)},
 		{"POST", "/api/v1/pipelines/lint", static("/api/v1/pipelines/lint", `{"pipeline":"version: 1"}`),
 			statuses(200, 200, 200, 200, 200, 401, 200)},
 		{"GET", "/api/v1/orgs/{orgSlug}/runners", func(*fixture) (string, string) { return org("/runners"), "" },

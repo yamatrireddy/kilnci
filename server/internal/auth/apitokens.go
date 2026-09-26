@@ -26,6 +26,7 @@ var tokenScopes = []authz.Action{
 	authz.ActionAuditRead,
 	authz.ActionRunsList,
 	authz.ActionRunsRead,
+	authz.ActionLogsRead,
 	authz.ActionPipelinesLint, // side-effect free; backs `kiln lint`
 }
 

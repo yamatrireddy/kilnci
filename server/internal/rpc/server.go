@@ -69,6 +69,7 @@ var methodPolicy = map[string]rule{
 	runnerv1.RunnerService_Lease_FullMethodName:            ruleRunnerCertificate,
 	runnerv1.RunnerService_Heartbeat_FullMethodName:        ruleRunnerCertificate,
 	runnerv1.RunnerService_CompleteJob_FullMethodName:      ruleRunnerCertificate,
+	runnerv1.RunnerService_AppendLogs_FullMethodName:       ruleRunnerCertificate,
 }
 
 // Options configures the runner gRPC server.
@@ -95,6 +96,7 @@ type Options struct {
 type Services struct {
 	Runners   RunnerIdentity
 	Scheduler Scheduler
+	Logs      LogSink
 	// Checkout resolves where a run's code comes from; nil means jobs get no
 	// checkout (Phase 1 before VCS integration is configured).
 	Checkout CheckoutProvider
@@ -112,8 +114,8 @@ func New(log *slog.Logger, svc Services, opts Options) (*Server, error) {
 	if opts.CA == nil || len(opts.Hostnames) == 0 {
 		return nil, errors.New("rpc: CA and hostnames are required")
 	}
-	if svc.Runners == nil || svc.Scheduler == nil {
-		return nil, errors.New("rpc: runner and scheduler services are required")
+	if svc.Runners == nil || svc.Scheduler == nil || svc.Logs == nil {
+		return nil, errors.New("rpc: runner, scheduler, and log services are required")
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -154,7 +156,8 @@ func New(log *slog.Logger, svc Services, opts Options) (*Server, error) {
 	}
 	gs := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsCfg)),
-		grpc.MaxRecvMsgSize(4<<20),
+		// A log chunk (256 KiB) plus framing is the largest request.
+		grpc.MaxRecvMsgSize(1<<20),
 		grpc.MaxSendMsgSize(4<<20),
 		grpc.MaxConcurrentStreams(64),
 		grpc.ConnectionTimeout(10*time.Second),

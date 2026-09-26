@@ -984,6 +984,132 @@ func (*CompleteJobResponse) Descriptor() ([]byte, []int) {
 	return file_kiln_runner_v1_runner_proto_rawDescGZIP(), []int{13}
 }
 
+// AppendLogsRequest is one chunk of job output, already masked by the runner.
+type AppendLogsRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ProtocolVersion uint32                 `protobuf:"varint,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	JobId           string                 `protobuf:"bytes,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	LeaseId         []byte                 `protobuf:"bytes,3,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
+	// seq numbers chunks from 0 without gaps.
+	Seq uint32 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"`
+	// data is at most 256 KiB.
+	Data          []byte `protobuf:"bytes,5,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppendLogsRequest) Reset() {
+	*x = AppendLogsRequest{}
+	mi := &file_kiln_runner_v1_runner_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppendLogsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppendLogsRequest) ProtoMessage() {}
+
+func (x *AppendLogsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kiln_runner_v1_runner_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppendLogsRequest.ProtoReflect.Descriptor instead.
+func (*AppendLogsRequest) Descriptor() ([]byte, []int) {
+	return file_kiln_runner_v1_runner_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AppendLogsRequest) GetProtocolVersion() uint32 {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return 0
+}
+
+func (x *AppendLogsRequest) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *AppendLogsRequest) GetLeaseId() []byte {
+	if x != nil {
+		return x.LeaseId
+	}
+	return nil
+}
+
+func (x *AppendLogsRequest) GetSeq() uint32 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *AppendLogsRequest) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+// AppendLogsResponse acknowledges a chunk.
+type AppendLogsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// truncated is true once the job's log limit is reached; the runner
+	// should stop sending output for this job.
+	Truncated     bool `protobuf:"varint,1,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppendLogsResponse) Reset() {
+	*x = AppendLogsResponse{}
+	mi := &file_kiln_runner_v1_runner_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppendLogsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppendLogsResponse) ProtoMessage() {}
+
+func (x *AppendLogsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kiln_runner_v1_runner_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppendLogsResponse.ProtoReflect.Descriptor instead.
+func (*AppendLogsResponse) Descriptor() ([]byte, []int) {
+	return file_kiln_runner_v1_runner_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *AppendLogsResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
 var File_kiln_runner_v1_runner_proto protoreflect.FileDescriptor
 
 const file_kiln_runner_v1_runner_proto_rawDesc = "" +
@@ -1053,18 +1179,28 @@ const file_kiln_runner_v1_runner_proto_rawDesc = "" +
 	"\x0efailure_reason\x18\x06 \x01(\tR\rfailureReasonB\f\n" +
 	"\n" +
 	"_exit_code\"\x15\n" +
-	"\x13CompleteJobResponse*q\n" +
+	"\x13CompleteJobResponse\"\x96\x01\n" +
+	"\x11AppendLogsRequest\x12)\n" +
+	"\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12\x15\n" +
+	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x19\n" +
+	"\blease_id\x18\x03 \x01(\fR\aleaseId\x12\x10\n" +
+	"\x03seq\x18\x04 \x01(\rR\x03seq\x12\x12\n" +
+	"\x04data\x18\x05 \x01(\fR\x04data\"2\n" +
+	"\x12AppendLogsResponse\x12\x1c\n" +
+	"\ttruncated\x18\x01 \x01(\bR\ttruncated*q\n" +
 	"\tJobResult\x12\x1a\n" +
 	"\x16JOB_RESULT_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14JOB_RESULT_SUCCEEDED\x10\x01\x12\x15\n" +
 	"\x11JOB_RESULT_FAILED\x10\x02\x12\x17\n" +
-	"\x13JOB_RESULT_CANCELED\x10\x032\xb5\x03\n" +
+	"\x13JOB_RESULT_CANCELED\x10\x032\x8a\x04\n" +
 	"\rRunnerService\x12M\n" +
 	"\bRegister\x12\x1f.kiln.runner.v1.RegisterRequest\x1a .kiln.runner.v1.RegisterResponse\x12e\n" +
 	"\x10RenewCertificate\x12'.kiln.runner.v1.RenewCertificateRequest\x1a(.kiln.runner.v1.RenewCertificateResponse\x12D\n" +
 	"\x05Lease\x12\x1c.kiln.runner.v1.LeaseRequest\x1a\x1d.kiln.runner.v1.LeaseResponse\x12P\n" +
 	"\tHeartbeat\x12 .kiln.runner.v1.HeartbeatRequest\x1a!.kiln.runner.v1.HeartbeatResponse\x12V\n" +
-	"\vCompleteJob\x12\".kiln.runner.v1.CompleteJobRequest\x1a#.kiln.runner.v1.CompleteJobResponseBEZCgithub.com/yamatrireddy/kilnci/proto/gen/go/kiln/runner/v1;runnerv1b\x06proto3"
+	"\vCompleteJob\x12\".kiln.runner.v1.CompleteJobRequest\x1a#.kiln.runner.v1.CompleteJobResponse\x12S\n" +
+	"\n" +
+	"AppendLogs\x12!.kiln.runner.v1.AppendLogsRequest\x1a\".kiln.runner.v1.AppendLogsResponseBEZCgithub.com/yamatrireddy/kilnci/proto/gen/go/kiln/runner/v1;runnerv1b\x06proto3"
 
 var (
 	file_kiln_runner_v1_runner_proto_rawDescOnce sync.Once
@@ -1079,7 +1215,7 @@ func file_kiln_runner_v1_runner_proto_rawDescGZIP() []byte {
 }
 
 var file_kiln_runner_v1_runner_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kiln_runner_v1_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_kiln_runner_v1_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_kiln_runner_v1_runner_proto_goTypes = []any{
 	(JobResult)(0),                   // 0: kiln.runner.v1.JobResult
 	(*RegisterRequest)(nil),          // 1: kiln.runner.v1.RegisterRequest
@@ -1096,6 +1232,8 @@ var file_kiln_runner_v1_runner_proto_goTypes = []any{
 	(*HeartbeatResponse)(nil),        // 12: kiln.runner.v1.HeartbeatResponse
 	(*CompleteJobRequest)(nil),       // 13: kiln.runner.v1.CompleteJobRequest
 	(*CompleteJobResponse)(nil),      // 14: kiln.runner.v1.CompleteJobResponse
+	(*AppendLogsRequest)(nil),        // 15: kiln.runner.v1.AppendLogsRequest
+	(*AppendLogsResponse)(nil),       // 16: kiln.runner.v1.AppendLogsResponse
 }
 var file_kiln_runner_v1_runner_proto_depIdxs = []int32{
 	7,  // 0: kiln.runner.v1.LeaseResponse.job:type_name -> kiln.runner.v1.Job
@@ -1109,13 +1247,15 @@ var file_kiln_runner_v1_runner_proto_depIdxs = []int32{
 	5,  // 8: kiln.runner.v1.RunnerService.Lease:input_type -> kiln.runner.v1.LeaseRequest
 	11, // 9: kiln.runner.v1.RunnerService.Heartbeat:input_type -> kiln.runner.v1.HeartbeatRequest
 	13, // 10: kiln.runner.v1.RunnerService.CompleteJob:input_type -> kiln.runner.v1.CompleteJobRequest
-	2,  // 11: kiln.runner.v1.RunnerService.Register:output_type -> kiln.runner.v1.RegisterResponse
-	4,  // 12: kiln.runner.v1.RunnerService.RenewCertificate:output_type -> kiln.runner.v1.RenewCertificateResponse
-	6,  // 13: kiln.runner.v1.RunnerService.Lease:output_type -> kiln.runner.v1.LeaseResponse
-	12, // 14: kiln.runner.v1.RunnerService.Heartbeat:output_type -> kiln.runner.v1.HeartbeatResponse
-	14, // 15: kiln.runner.v1.RunnerService.CompleteJob:output_type -> kiln.runner.v1.CompleteJobResponse
-	11, // [11:16] is the sub-list for method output_type
-	6,  // [6:11] is the sub-list for method input_type
+	15, // 11: kiln.runner.v1.RunnerService.AppendLogs:input_type -> kiln.runner.v1.AppendLogsRequest
+	2,  // 12: kiln.runner.v1.RunnerService.Register:output_type -> kiln.runner.v1.RegisterResponse
+	4,  // 13: kiln.runner.v1.RunnerService.RenewCertificate:output_type -> kiln.runner.v1.RenewCertificateResponse
+	6,  // 14: kiln.runner.v1.RunnerService.Lease:output_type -> kiln.runner.v1.LeaseResponse
+	12, // 15: kiln.runner.v1.RunnerService.Heartbeat:output_type -> kiln.runner.v1.HeartbeatResponse
+	14, // 16: kiln.runner.v1.RunnerService.CompleteJob:output_type -> kiln.runner.v1.CompleteJobResponse
+	16, // 17: kiln.runner.v1.RunnerService.AppendLogs:output_type -> kiln.runner.v1.AppendLogsResponse
+	12, // [12:18] is the sub-list for method output_type
+	6,  // [6:12] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -1133,7 +1273,7 @@ func file_kiln_runner_v1_runner_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kiln_runner_v1_runner_proto_rawDesc), len(file_kiln_runner_v1_runner_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

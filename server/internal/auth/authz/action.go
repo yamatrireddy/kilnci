@@ -32,6 +32,8 @@ const (
 	ActionRunsCancel  Action = "runs:cancel"
 	ActionRunsApprove Action = "runs:approve"
 
+	ActionLogsRead Action = "logs:read"
+
 	ActionPipelinesLint Action = "pipelines:lint"
 
 	ActionRunnersList   Action = "runners:list"
@@ -85,6 +87,10 @@ var policy = map[Action]rule{
 	ActionRunsCancel: {minRole: domain.RoleDeveloper},
 	// Approving runs untrusted (fork) code on the org's runners (ADR-0008 §5).
 	ActionRunsApprove: {minRole: domain.RoleDeveloper},
+
+	// Logs can contain leaked secrets despite masking (A10); same audience
+	// as the run itself.
+	ActionLogsRead: {minRole: domain.RoleViewer},
 
 	ActionPipelinesLint: {selfOnly: true}, // reads no tenant data
 

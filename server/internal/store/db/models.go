@@ -101,6 +101,18 @@ type Job struct {
 	QueuedAt        *time.Time
 	StartedAt       *time.Time
 	FinishedAt      *time.Time
+	LogBytes        int64
+	LogTruncated    bool
+}
+
+type JobLogChunk struct {
+	OrgID     string
+	JobID     string
+	Seq       int32
+	Size      int32
+	Sha256    []byte
+	ObjectKey string
+	CreatedAt time.Time
 }
 
 type LoginState struct {

@@ -22,16 +22,19 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/api"
 	"github.com/yamatrireddy/kilnci/server/internal/auth"
 	"github.com/yamatrireddy/kilnci/server/internal/auth/authz"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/bus"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/config"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/httpclient"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/httpserver"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/ids"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/logging"
+	"github.com/yamatrireddy/kilnci/server/internal/platform/objstore"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/pki"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/telemetry"
 	"github.com/yamatrireddy/kilnci/server/internal/rpc"
 	"github.com/yamatrireddy/kilnci/server/internal/scheduler"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
+	"github.com/yamatrireddy/kilnci/server/internal/service/logs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
@@ -144,6 +147,22 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 	}
 	runnerSvc := runners.NewService(st, authorizer, recorder, signer, gen, nil)
 
+	checks := map[string]api.ReadinessCheck{"database": st.Ping}
+	logStore, err := openLogStore(cfg)
+	if err != nil {
+		return err
+	}
+	checks["log_store"] = logStore.Ping
+	notifier, err := openBus(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = notifier.Close() }()
+	if n, ok := notifier.(*bus.NATS); ok {
+		checks["nats"] = n.Ping
+	}
+	logSvc := logs.NewService(st, authorizer, logStore, notifier, logs.Options{MaxLogBytes: cfg.Logs.MaxBytes}, nil)
+
 	var webFS fs.FS
 	if cfg.Web.Dir != "" {
 		webFS = os.DirFS(cfg.Web.Dir)
@@ -156,7 +175,8 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		Orgs:    orgSvc,
 		Runs:    runSvc,
 		Runners: runnerSvc,
-		Checks:  map[string]api.ReadinessCheck{"database": st.Ping},
+		Logs:    logSvc,
+		Checks:  checks,
 		Options: api.Options{
 			MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,
 			AllowedOrigins: cfg.HTTP.AllowedOrigins,
@@ -191,7 +211,7 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		return nil
 	})
 	if ca != nil {
-		rpcSrv, err := rpc.New(log, rpc.Services{Runners: runnerSvc, Scheduler: sched}, rpc.Options{CA: ca, Hostnames: cfg.Runner.Hostnames})
+		rpcSrv, err := rpc.New(log, rpc.Services{Runners: runnerSvc, Scheduler: sched, Logs: logSvc}, rpc.Options{CA: ca, Hostnames: cfg.Runner.Hostnames})
 		if err != nil {
 			return fmt.Errorf("build runner server: %w", err)
 		}
@@ -208,6 +228,43 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 	}
 	log.InfoContext(ctx, "kiln-server stopped")
 	return nil
+}
+
+// openLogStore opens the configured job log store (ADR-0007 §2).
+func openLogStore(cfg *config.Config) (objstore.Store, error) {
+	if cfg.Logs.Store == "s3" {
+		client := httpclient.New(httpclient.Options{AllowedPrefixes: cfg.HTTP.EgressAllowedPrefixes, Timeout: time.Minute})
+		st, err := objstore.NewS3(objstore.S3Options{
+			Endpoint: cfg.Logs.S3.Endpoint, Bucket: cfg.Logs.S3.Bucket, Region: cfg.Logs.S3.Region, Prefix: cfg.Logs.S3.Prefix,
+			AccessKey: cfg.Logs.S3.AccessKey, SecretKey: cfg.Logs.S3.SecretKey.Reveal(), UseTLS: cfg.Logs.S3.UseTLS,
+			Transport: client.Transport,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("log store: %w", err)
+		}
+		return st, nil
+	}
+	st, err := objstore.NewFS(cfg.Logs.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("log store: %w", err)
+	}
+	return st, nil
+}
+
+// openBus connects the live notification bus: NATS when configured,
+// otherwise in-process (single replica / --embedded).
+func openBus(cfg *config.Config) (bus.Bus, error) {
+	if cfg.NATS.URL == "" {
+		return bus.NewInProcess(), nil
+	}
+	b, err := bus.NewNATS(bus.NATSOptions{
+		URL: cfg.NATS.URL, CredsFile: cfg.NATS.CredsFile, User: cfg.NATS.User,
+		Password: cfg.NATS.Password.Reveal(), Insecure: cfg.NATS.Insecure,
+	})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // contextual, credential-free
+	}
+	return b, nil
 }
 
 // runnerCA implements `kiln-server runner-ca init --dir DIR`, which creates

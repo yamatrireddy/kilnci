@@ -359,6 +359,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A job's stored log (masked by the runner)
+         * @description Raw bytes as the job wrote them (ANSI escapes included). Clients must
+         *     render them through the sanitizing log viewer, never as HTML. Served
+         *     with `Content-Security-Policy: sandbox` and `nosniff` (ADR-0007).
+         */
+        get: operations["getJobLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}/logs/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Live log tail as Server-Sent Events (ADR-0007)
+         * @description Replays stored chunks after `Last-Event-ID`, then follows new ones
+         *     until the job finishes. `chunk` events carry `{"seq":n,"data":"<base64>"}`;
+         *     a final `end` event carries `{"status":"<job status>"}`. Streams
+         *     close after 30 minutes; reconnect with `Last-Event-ID`.
+         */
+        get: operations["streamJobLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pipelines/lint": {
         parameters: {
             query?: never;
@@ -496,7 +551,7 @@ export interface components {
          * @description Actions an API token may be scoped to (read-only).
          * @enum {string}
          */
-        Permission: "session:read" | "orgs:list" | "orgs:read" | "members:list" | "projects:list" | "projects:read" | "audit:read" | "runs:list" | "runs:read" | "pipelines:lint";
+        Permission: "session:read" | "orgs:list" | "orgs:read" | "members:list" | "projects:list" | "projects:read" | "audit:read" | "runs:list" | "runs:read" | "pipelines:lint" | "logs:read";
         Health: {
             /** @enum {string} */
             status: "ok";
@@ -1498,6 +1553,70 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    getJobLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The log */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    streamJobLog: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Last-Event-ID"?: number;
+            };
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+                jobId: components["schemas"]["ID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["Validation"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["Internal"];

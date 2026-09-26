@@ -24,6 +24,10 @@ service RunnerService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   // CompleteJob reports a leased job's result and releases the lease.
   rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
+  // AppendLogs uploads the next chunk of a leased job's (masked) output
+  // (ADR-0007). Chunks are numbered from 0 with no gaps; resending a chunk
+  // with identical content is acknowledged, different content is rejected.
+  rpc AppendLogs(AppendLogsRequest) returns (AppendLogsResponse);
 }
 
 // RegisterRequest carries the registration token and the runner's CSR.
@@ -151,3 +155,21 @@ message CompleteJobRequest {
 
 // CompleteJobResponse is empty.
 message CompleteJobResponse {}
+
+// AppendLogsRequest is one chunk of job output, already masked by the runner.
+message AppendLogsRequest {
+  uint32 protocol_version = 1;
+  string job_id = 2;
+  bytes lease_id = 3;
+  // seq numbers chunks from 0 without gaps.
+  uint32 seq = 4;
+  // data is at most 256 KiB.
+  bytes data = 5;
+}
+
+// AppendLogsResponse acknowledges a chunk.
+message AppendLogsResponse {
+  // truncated is true once the job's log limit is reached; the runner
+  // should stop sending output for this job.
+  bool truncated = 1;
+}
