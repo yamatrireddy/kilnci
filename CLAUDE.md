@@ -28,9 +28,9 @@ only summarizes them.
 
 ## Current status
 
-- **Active phase:** Phase 0 — Foundations, implemented and pending maintainer review
-  (see `docs/roadmap.md`). Server, web (React + Tailwind CSS), and desktop (Tauri) exist;
-  `runner/`, `cli/`, `proto/`, and `apps/mobile` do not yet.
+- **Active phase:** Phase 1 — CI core, in progress (see `docs/roadmap.md`). Server,
+  web (React + Tailwind CSS), desktop (Tauri), `runner/`, and `proto/` exist; the runs
+  UI with the log viewer, `cli/`, and `apps/mobile` do not yet.
 - **Stable contracts:** none yet. Treat `docs/api/openapi.yaml` and `proto/` as draft.
 - **UI:** Tailwind CSS 4 with native-element primitives in `packages/ui` for web and
   desktop; build-time CSS only, no runtime style injection (ADR-0004).
