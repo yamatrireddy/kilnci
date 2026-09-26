@@ -24,7 +24,8 @@ Sign in with **Continue with single sign-on**. Dex's mock connector signs you in
 `kilgore@kilgore.trout`, which `scripts/dev-server.sh` lists as a bootstrap instance
 admin, so you can create organizations. `make dev` serves the production build with
 the production CSP; for UI hot reload run `pnpm --filter web dev` (port 5173, proxies
-`/api`) and start the server with `KILN_PUBLIC_URL=http://localhost:5173`.
+`/api`) and start the server with `KILN_PUBLIC_URL=http://localhost:5173 make dev`.
+To connect a local runner, see the README's "Run it locally" section.
 
 Desktop: `pnpm --filter desktop tauri dev`, then enter `http://localhost:8080` as the
 server URL.
