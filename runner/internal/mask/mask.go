@@ -5,9 +5,22 @@
 //
 // For every value it masks the raw bytes, standard and URL-safe base64 (at
 // all three byte alignments, so a value embedded in larger encoded data is
-// still caught), hex, URL query escaping, and each line of a multi-line
-// value. Matches split across Write calls are caught by holding back the
-// last len(longest variant)-1 bytes until more data or Close arrives.
+// still caught), lower- and upper-case hex, URL query and path escaping, the
+// JSON string escaping, and each line of a multi-line value.
+//
+// Base64 is often line-wrapped (coreutils base64 wraps at 76 columns, PEM and
+// openssl at 64), and the wrap phase depends on whatever precedes the value
+// in the encoded stream. So besides each whole aligned encoding, every
+// wrapWindow-character substring of it is masked, as are its prefixes and
+// suffixes down to the minimum length. Each line of a wrapped encoding is
+// then masked whatever the wrap width (>= wrapWindow) or phase; at most
+// minLen-1 characters at a line edge can remain visible.
+//
+// Matches split across Write calls are caught by holding back the last
+// len(longest variant)-1 bytes until more data or Close arrives. A match is
+// only decided once every longer pattern that could start at the same
+// position has been fully seen, so the output does not depend on how the
+// input was split into writes.
 //
 // Masking is a safety net, not a security boundary: code that is given a
 // secret can always exfiltrate it. The primary control is not giving
@@ -18,6 +31,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/url"
@@ -33,31 +47,49 @@ const Replacement = "***"
 // ordinary output and reveal little.
 const minLen = 4
 
+// wrapWindow is the length of the base64 substrings masked to catch
+// line-wrapped encodings. It must not exceed the narrowest wrap width we
+// want to cover (64, as PEM and openssl use) and is long enough (96 bits of
+// the value) that it does not match unrelated output.
+const wrapWindow = 16
+
 // Writer masks values in everything written to it and forwards the result
 // to the underlying writer. It is safe for concurrent use.
 type Writer struct {
-	mu       sync.Mutex
-	w        io.Writer
-	patterns [][]byte // longest first
-	byFirst  map[byte][][]byte
-	hold     int // bytes held back for matches split across writes
-	buf      []byte
-	closed   bool
+	mu      sync.Mutex
+	w       io.Writer
+	byFirst [256][][]byte       // exact patterns by first byte, longest first
+	windows map[string]struct{} // wrapWindow-long base64 substrings
+	winHead []uint64            // prefilter bitset over the first 4 bytes of windows
+	hold    int                 // bytes held back for matches split across writes
+	buf     []byte              // input not yet emitted, unmasked
+	carry   int                 // leading bytes of buf covered by an already-decided match
+	masking bool                // the last byte emitted was part of a masked run
+	closed  bool
 }
 
 // New returns a Writer that masks values (and their encodings) written to w.
 func New(w io.Writer, values []string) *Writer {
-	set := map[string]bool{}
+	exact := map[string]bool{}
+	windows := map[string]struct{}{}
 	for _, v := range values {
 		for _, variant := range Variants(v) {
 			if len(variant) >= minLen {
-				set[variant] = true
+				exact[variant] = true
+			}
+		}
+		for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding} {
+			for _, s := range alignedBase64(enc, []byte(v)) {
+				addWrapPieces(s, exact, windows)
 			}
 		}
 	}
-	patterns := make([][]byte, 0, len(set))
+	patterns := make([][]byte, 0, len(exact))
 	maxLen := 0
-	for p := range set {
+	if len(windows) > 0 {
+		maxLen = wrapWindow
+	}
+	for p := range exact {
 		patterns = append(patterns, []byte(p))
 		maxLen = max(maxLen, len(p))
 	}
@@ -71,19 +103,33 @@ func New(w io.Writer, values []string) *Writer {
 	if maxLen > 0 {
 		hold = maxLen - 1
 	}
-	byFirst := map[byte][][]byte{}
+	m := &Writer{w: w, windows: windows, hold: hold}
 	for _, p := range patterns {
-		byFirst[p[0]] = append(byFirst[p[0]], p)
+		m.byFirst[p[0]] = append(m.byFirst[p[0]], p)
 	}
-	return &Writer{w: w, patterns: patterns, byFirst: byFirst, hold: hold}
+	if len(windows) > 0 {
+		m.winHead = make([]uint64, 1<<headBits/64)
+		for win := range windows {
+			h := headHash([]byte(win[:4]))
+			m.winHead[h/64] |= 1 << (h % 64)
+		}
+	}
+	return m
 }
 
-// Variants returns the encodings of v that are masked.
+// Variants returns the encodings of v that are masked as whole strings.
+// Line-wrapped base64 is handled separately (see the package comment).
 func Variants(v string) []string {
 	if v == "" {
 		return nil
 	}
-	out := []string{v, hex.EncodeToString([]byte(v)), url.QueryEscape(v), url.PathEscape(v)}
+	h := hex.EncodeToString([]byte(v))
+	out := []string{v, h, strings.ToUpper(h), url.QueryEscape(v), url.PathEscape(v)}
+	for _, escapeHTML := range []bool{true, false} {
+		if j := jsonEscaped(v, escapeHTML); j != v {
+			out = append(out, j)
+		}
+	}
 	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding} {
 		out = append(out, alignedBase64(enc, []byte(v))...)
 	}
@@ -95,6 +141,20 @@ func Variants(v string) []string {
 		}
 	}
 	return out
+}
+
+// jsonEscaped returns v as it appears inside a JSON string literal: as
+// encoding/json writes it (escapeHTML) or as most other encoders (jq,
+// JSON.stringify) do.
+func jsonEscaped(v string, escapeHTML bool) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(escapeHTML)
+	if err := enc.Encode(v); err != nil {
+		return v // unreachable: a string always encodes
+	}
+	s := strings.TrimSuffix(b.String(), "\n")
+	return s[1 : len(s)-1] // drop the quotes
 }
 
 // alignedBase64 returns the base64 characters determined only by v's bytes
@@ -117,11 +177,26 @@ func alignedBase64(enc *base64.Encoding, v []byte) []string {
 	return out
 }
 
+// addWrapPieces records the patterns that mask every line of s when s is
+// line-wrapped at any width >= wrapWindow and in any phase: all
+// wrapWindow-long substrings (full lines and long edge pieces) and the
+// shorter prefixes and suffixes (the value's pieces on its first and last
+// line).
+func addWrapPieces(s string, exact map[string]bool, windows map[string]struct{}) {
+	for i := 0; i+wrapWindow <= len(s); i++ {
+		windows[s[i:i+wrapWindow]] = struct{}{}
+	}
+	for n := minLen; n < min(len(s), wrapWindow); n++ {
+		exact[s[:n]] = true
+		exact[s[len(s)-n:]] = true
+	}
+}
+
 // ErrClosed is returned by Write after Close.
 var ErrClosed = errors.New("mask: writer closed")
 
 // Write masks p (together with held-back bytes) and forwards everything that
-// can no longer be part of a match.
+// can no longer be part of an undecided match.
 func (m *Writer) Write(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -129,13 +204,8 @@ func (m *Writer) Write(p []byte) (int, error) {
 		return 0, ErrClosed
 	}
 	m.buf = append(m.buf, p...)
-	m.buf = m.replace(m.buf)
-	if len(m.buf) > m.hold {
-		n := len(m.buf) - m.hold
-		if _, err := m.w.Write(m.buf[:n]); err != nil {
-			return 0, err //nolint:wrapcheck // pass through the sink's error
-		}
-		m.buf = append(m.buf[:0], m.buf[n:]...)
+	if err := m.emit(false); err != nil {
+		return 0, err
 	}
 	return len(p), nil
 }
@@ -149,50 +219,90 @@ func (m *Writer) Close() error {
 		return nil
 	}
 	m.closed = true
-	if len(m.buf) == 0 {
-		return nil
-	}
-	out := m.replace(m.buf)
+	err := m.emit(true)
 	m.buf = nil
-	_, err := m.w.Write(out)
-	return err //nolint:wrapcheck // pass through the sink's error
+	return err
 }
 
-// replace masks every occurrence of every pattern in b. Overlapping or
-// adjacent matches are merged into one replacement, so masking one value can
-// never leave part of another (overlapping) value visible.
-func (m *Writer) replace(b []byte) []byte {
-	if len(m.patterns) == 0 || len(b) == 0 {
-		return b
+// emit masks and writes the decided prefix of buf. The match at start
+// position i is decided once i+hold < len(buf): every pattern that could
+// start there then fits in buf, so the longest one is known and a shorter
+// pattern that is a prefix of a longer one cannot be replaced early. With
+// final set, everything is decided. Overlapping or adjacent matches merge
+// into one replacement, also across calls, so masking one value never leaves
+// part of an overlapping value visible and output does not depend on how the
+// input was split into writes.
+func (m *Writer) emit(final bool) error {
+	limit := len(m.buf)
+	if !final {
+		limit -= m.hold
 	}
-	// end[i] > i marks that a match covers b[i:end[i]].
-	covered := make([]bool, len(b))
-	any := false
-	for i := range b {
-		for _, p := range m.byFirst[b[i]] {
-			if bytes.HasPrefix(b[i:], p) {
-				for j := i; j < i+len(p); j++ {
-					covered[j] = true
-				}
-				any = true
-				break // patterns are longest first
+	if limit <= 0 {
+		return nil
+	}
+	covered := make([]bool, limit)
+	end := m.carry // end of the furthest decided match, relative to buf
+	for i := range min(m.carry, limit) {
+		covered[i] = true
+	}
+	for i := range limit {
+		n := m.matchAt(i)
+		for j := i; j < min(i+n, limit); j++ {
+			covered[j] = true
+		}
+		end = max(end, i+n)
+	}
+	out := make([]byte, 0, limit)
+	masking := m.masking
+	for i := range limit {
+		if covered[i] {
+			if !masking {
+				out = append(out, Replacement...)
+				masking = true
+			}
+			continue
+		}
+		masking = false
+		out = append(out, m.buf[i])
+	}
+	if len(out) > 0 {
+		if _, err := m.w.Write(out); err != nil {
+			return err //nolint:wrapcheck // pass through the sink's error
+		}
+	}
+	m.masking = masking
+	m.carry = max(0, end-limit)
+	m.buf = append(m.buf[:0], m.buf[limit:]...)
+	return nil
+}
+
+// matchAt returns the length of the longest pattern matching buf at i, or 0.
+func (m *Writer) matchAt(i int) int {
+	b := m.buf[i:]
+	n := 0
+	for _, p := range m.byFirst[b[0]] {
+		if bytes.HasPrefix(b, p) {
+			n = len(p) // patterns are longest first
+			break
+		}
+	}
+	if n < wrapWindow && len(b) >= wrapWindow && m.winHead != nil {
+		// The bitset rejects most positions before the map lookup hashes.
+		if h := headHash(b); m.winHead[h/64]&(1<<(h%64)) != 0 {
+			if _, ok := m.windows[string(b[:wrapWindow])]; ok {
+				n = wrapWindow
 			}
 		}
 	}
-	if !any {
-		return b
-	}
-	out := make([]byte, 0, len(b))
-	for i := 0; i < len(b); {
-		if !covered[i] {
-			out = append(out, b[i])
-			i++
-			continue
-		}
-		out = append(out, Replacement...)
-		for i < len(b) && covered[i] {
-			i++
-		}
-	}
-	return out
+	return n
+}
+
+// headBits sizes the windows prefilter (2^headBits bits, 128 KiB), so it
+// stays sparse even for values of several KiB.
+const headBits = 20
+
+// headHash maps the first four bytes of b to a prefilter bit index.
+func headHash(b []byte) uint32 {
+	x := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
+	return (x * 0x9e3779b1) >> (32 - headBits)
 }
