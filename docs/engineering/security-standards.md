@@ -210,7 +210,10 @@ Job code is hostile by assumption.
 **Dependencies**
 - Lockfiles committed (`go.sum`, `pnpm-lock.yaml`, `Cargo.lock`).
 - License allowlist: Apache-2.0, MIT, BSD-2/3-Clause, ISC, MPL-2.0 (file-level).
-  GPL/AGPL/SSPL and unknown licenses are rejected.
+  GPL/AGPL/SSPL and unknown licenses are rejected. Public-domain-equivalent
+  licenses (0BSD, CC0-1.0, BlueOak-1.0.0, MIT-0) and named exceptions for
+  development-only npm packages are listed in `scripts/license-check.mjs`;
+  both lists need security-owner approval.
 - New dependencies need: active maintenance, no known unpatched critical/high
   vulnerabilities, and a justification. Prefer the standard library.
 - Renovate opens update PRs; security updates are prioritized.
