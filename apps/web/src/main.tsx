@@ -28,6 +28,8 @@ const client = createKilnClient({
 const platform: Platform = {
   name: "Kiln",
   client,
+  // The browser's fetch streams, so job logs follow live over SSE.
+  liveLogs: true,
   signIn: (returnTo) => {
     const q = new URLSearchParams({ client: "web", returnTo });
     window.location.assign(`/api/v1/auth/login?${q.toString()}`);

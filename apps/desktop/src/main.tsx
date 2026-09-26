@@ -32,6 +32,9 @@ const client = createKilnClient({
 const platform: Platform = {
   name: "Kiln",
   client,
+  // The IPC fetch buffers whole responses, so the log viewer re-reads the
+  // stored log instead of streaming (live tails on desktop: follow-up).
+  liveLogs: false,
   signIn: async (returnTo) => {
     await invoke("sign_in");
     queryClient.clear();

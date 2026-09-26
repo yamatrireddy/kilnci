@@ -8,6 +8,7 @@ import { Spinner, TextLink } from "./components/ui";
 import { OrgPage } from "./pages/OrgPage";
 import { OrgsPage } from "./pages/OrgsPage";
 import { ProjectPage } from "./pages/ProjectPage";
+import { RunPage } from "./pages/RunPage";
 import { SignInPage } from "./pages/SignInPage";
 import { TokensPage } from "./pages/TokensPage";
 import { useSession } from "./queries";
@@ -61,6 +62,7 @@ export const kilnRoutes: RouteObject[] = [
       { path: "/orgs", element: <OrgsPage /> },
       { path: "/orgs/:orgSlug", element: <OrgPage /> },
       { path: "/orgs/:orgSlug/projects/:projectSlug", element: <ProjectPage /> },
+      { path: "/orgs/:orgSlug/projects/:projectSlug/runs/:runId", element: <RunPage /> },
       { path: "/settings/tokens", element: <TokensPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

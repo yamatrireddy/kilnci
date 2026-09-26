@@ -15,7 +15,8 @@ const pages: [string, string, RegExp][] = [
   ["org projects", "/orgs/acme", /Web/],
   ["org members", "/orgs/acme?tab=members", /bob@example.com/],
   ["org audit", "/orgs/acme?tab=audit", /members:add/],
-  ["project", "/orgs/acme/projects/web", /No pipelines yet/],
+  ["project", "/orgs/acme/projects/web", /#42/],
+  ["run", "/orgs/acme/projects/web/runs/01ARZ3NDEKTSV4RRFFQ69G5FB1", /stored/],
   ["tokens", "/settings/tokens", /No API tokens/],
   ["not found", "/nope", /Page not found/],
 ];
