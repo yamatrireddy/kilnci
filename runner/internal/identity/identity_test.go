@@ -133,7 +133,7 @@ func TestRegisterAndLoad(t *testing.T) {
 	if !again.NeedsRenewal(time.Now().Add(45 * time.Minute)) {
 		t.Fatal("certificate past half-life does not need renewal")
 	}
-	if _, err := Load(t.TempDir()); err == nil || !strings.Contains(err.Error(), "not registered") {
+	if _, err := Load(filepath.Join(t.TempDir(), "empty")); err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("unregistered load = %v", err)
 	}
 }
