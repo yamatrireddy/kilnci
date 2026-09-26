@@ -17,6 +17,20 @@ const ALLOWED = new Set([
   "0BSD",
   "CC0-1.0",
   "BlueOak-1.0.0",
+  "MIT-0",
+]);
+
+// Exact package + license exceptions for development-only dependencies (build,
+// codegen, and test tooling that never ships in Kiln's web or desktop
+// bundles). A different license or version range of the same package, or
+// any other package with these licenses, still fails. Adding to this list
+// requires security-owner approval.
+const DEV_ONLY_EXCEPTIONS = new Map([
+  // js-yaml's CLI argument parser, via openapi-typescript (API client codegen).
+  ["argparse@Python-2.0", "codegen only"],
+  // Browser-support data, via browserslist in Babel/ESLint tooling. CC-BY-4.0
+  // applies to the data; it is not bundled into Kiln's output.
+  ["caniuse-lite@CC-BY-4.0", "lint and build tooling only"],
 ]);
 
 // SPDX expressions: an OR is acceptable if any branch is allowed; an AND needs all.
@@ -35,7 +49,10 @@ const byLicense = JSON.parse(out);
 const violations = [];
 for (const [license, pkgs] of Object.entries(byLicense)) {
   if (isAllowed(license)) continue;
-  for (const p of pkgs) violations.push(`${p.name}@${p.versions.join(",")}: ${license}`);
+  for (const p of pkgs) {
+    if (DEV_ONLY_EXCEPTIONS.has(`${p.name}@${license}`)) continue;
+    violations.push(`${p.name}@${p.versions.join(",")}: ${license}`);
+  }
 }
 if (violations.length > 0) {
   console.error("Disallowed dependency licenses:\n  " + violations.join("\n  "));

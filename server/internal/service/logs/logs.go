@@ -3,9 +3,12 @@
 // Package logs stores and serves job output (ADR-0007).
 //
 // Writes come only from the runner holding the job's lease, already masked,
-// as numbered chunks. Chunks are stored in object storage; PostgreSQL keeps
-// only metadata (sequence, size, SHA-256, key). Appends are idempotent per
-// sequence number and content, gap-free, and capped per job. Reads and live
+// as numbered chunks. Each lease attempt of a job has its own log: a job
+// retried after its lease lapsed starts again at chunk 0, and readers see
+// the latest attempt. Chunks are stored in object storage; PostgreSQL keeps
+// only metadata (attempt, sequence, size, SHA-256, key, writing runner and
+// lease). Appends are idempotent per sequence number and content, gap-free,
+// and capped per attempt. Reads and live
 // streams are authorized against the specific org and project; a streaming
 // reader is woken by the bus and re-reads state from the store.
 package logs
@@ -48,12 +51,10 @@ type Store interface {
 	InTx(ctx context.Context, fn func(ctx context.Context) error) error
 	GetOrgForMember(ctx context.Context, slug, userID string) (domain.OrgWithRole, error)
 	GetProject(ctx context.Context, orgID, slug string) (domain.Project, error)
-	GetLeasedJob(ctx context.Context, ref store.LeaseRef, now time.Time) (domain.Job, error)
-	LockJobLogState(ctx context.Context, orgID, jobID string) (store.JobLogState, error)
-	GetJobLogChunk(ctx context.Context, orgID, jobID string, seq int) (store.LogChunk, error)
+	LockJobLogState(ctx context.Context, ref store.LeaseRef, now time.Time) (store.JobLogState, error)
+	GetJobLogChunk(ctx context.Context, orgID, jobID string, attempt, seq int) (store.LogChunk, error)
 	InsertJobLogChunk(ctx context.Context, orgID, jobID string, c store.LogChunk, truncated bool, now time.Time) error
-	MarkJobLogTruncated(ctx context.Context, orgID, jobID string) error
-	ListJobLogChunks(ctx context.Context, orgID, jobID string, fromSeq int, limit int32) ([]store.LogChunk, error)
+	ListJobLogChunks(ctx context.Context, orgID, jobID string, attempt, fromSeq int, limit int32) ([]store.LogChunk, error)
 	GetRunJob(ctx context.Context, orgID, projectID, runID, jobID string) (store.RunJob, error)
 }
 
@@ -64,7 +65,7 @@ type Authorizer interface {
 
 // Options configures the service.
 type Options struct {
-	// MaxLogBytes per job. Default 64 MiB.
+	// MaxLogBytes per job attempt. Default 64 MiB.
 	MaxLogBytes int64
 	// StreamPoll is how often a stream re-checks without a bus wake-up.
 	// Default 5s.
@@ -100,8 +101,8 @@ func NewService(s Store, az Authorizer, obj objstore.Store, b bus.Bus, opts Opti
 	return &Service{store: s, az: az, obj: obj, bus: b, opts: opts, now: now}
 }
 
-func objectKey(orgID, runID, jobID string, seq int) string {
-	return strings.ToLower(fmt.Sprintf("orgs/%s/runs/%s/jobs/%s/%08d", orgID, runID, jobID, seq))
+func objectKey(orgID, runID, jobID string, attempt, seq int) string {
+	return strings.ToLower(fmt.Sprintf("orgs/%s/runs/%s/jobs/%s/attempts/%d/%08d", orgID, runID, jobID, attempt, seq))
 }
 
 // Append stores chunk seq of a leased job's output. It returns truncated
@@ -117,26 +118,29 @@ func (s *Service) Append(ctx context.Context, r scheduler.Runner, jobID string, 
 		return true, nil // past the chunk limit: acknowledged and dropped
 	}
 	now := s.now().UTC()
-	job, err := s.store.GetLeasedJob(ctx, store.LeaseRef{OrgID: r.OrgID, JobID: jobID, RunnerID: r.ID, LeaseID: leaseID}, now)
-	if errors.Is(err, domain.ErrNotFound) {
-		return false, scheduler.ErrLeaseLost
-	}
-	if err != nil {
-		return false, fmt.Errorf("append logs: %w", err)
-	}
+	ref := store.LeaseRef{OrgID: r.OrgID, JobID: jobID, RunnerID: r.ID, LeaseID: leaseID}
 	sum := sha256.Sum256(data)
 	var truncated bool
-	err = s.store.InTx(ctx, func(ctx context.Context) error {
-		st, err := s.store.LockJobLogState(ctx, job.OrgID, job.ID)
+	err := s.store.InTx(ctx, func(ctx context.Context) error {
+		// The lease is checked under the job's row lock, so an append cannot
+		// race a lease that lapses and is granted to another attempt.
+		st, err := s.store.LockJobLogState(ctx, ref, now)
+		if errors.Is(err, domain.ErrNotFound) {
+			return scheduler.ErrLeaseLost
+		}
 		if err != nil {
 			return err //nolint:wrapcheck // store errors are contextual
 		}
 		if seq < st.Chunks {
-			prev, err := s.store.GetJobLogChunk(ctx, job.OrgID, job.ID, seq)
+			prev, err := s.store.GetJobLogChunk(ctx, r.OrgID, jobID, st.Attempt, seq)
 			if err != nil {
 				return err //nolint:wrapcheck // store errors are contextual
 			}
-			if subtle.ConstantTimeCompare(prev.SHA256, sum[:]) != 1 {
+			sent := prev.SHA256
+			if prev.RequestSHA256 != nil {
+				sent = prev.RequestSHA256 // the chunk was stored cut short
+			}
+			if subtle.ConstantTimeCompare(sent, sum[:]) != 1 {
 				return fmt.Errorf("chunk %d was already stored with different content: %w", seq, domain.ErrConflict)
 			}
 			truncated = st.Truncated
@@ -155,22 +159,27 @@ func (s *Service) Append(ctx context.Context, r scheduler.Runner, jobID string, 
 			body = append(append([]byte{}, body[:min(int64(len(body)), cut)]...), TruncationMarker...)
 			truncated = true
 		}
-		key := objectKey(job.OrgID, job.RunID, job.ID, seq)
+		key := objectKey(r.OrgID, st.RunID, jobID, st.Attempt, seq)
 		if err := s.obj.Put(ctx, key, body); err != nil {
 			return fmt.Errorf("store log chunk: %w", err)
 		}
-		stored := sum
-		if truncated {
-			stored = sha256.Sum256(body)
+		c := store.LogChunk{
+			Attempt: st.Attempt, Seq: seq, Size: len(body), SHA256: sum[:], ObjectKey: key,
+			RunnerID: r.ID, LeaseID: leaseID,
 		}
-		return s.store.InsertJobLogChunk(ctx, job.OrgID, job.ID, store.LogChunk{
-			Seq: seq, Size: len(body), SHA256: stored[:], ObjectKey: key,
-		}, truncated, now)
+		if truncated {
+			stored := sha256.Sum256(body)
+			c.SHA256, c.RequestSHA256 = stored[:], sum[:]
+		}
+		return s.store.InsertJobLogChunk(ctx, r.OrgID, jobID, c, truncated, now)
 	})
+	if errors.Is(err, scheduler.ErrLeaseLost) {
+		return false, scheduler.ErrLeaseLost
+	}
 	if err != nil {
 		return false, fmt.Errorf("append logs: %w", err)
 	}
-	s.notify(ctx, job.OrgID, job.ID)
+	s.notify(ctx, r.OrgID, jobID)
 	return truncated, nil
 }
 
@@ -231,7 +240,7 @@ func (s *Service) Authorize(ctx context.Context, ref JobRef) error {
 
 const listBatch = 100
 
-// Read writes the job's stored log to w.
+// Read writes the stored log of the job's latest attempt to w.
 func (s *Service) Read(ctx context.Context, ref JobRef, w io.Writer) error {
 	ctx, span := tracer.Start(ctx, "logs.Read")
 	defer span.End()
@@ -239,18 +248,19 @@ func (s *Service) Read(ctx context.Context, ref JobRef, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.copyChunks(ctx, job, 0, func(_ int, data []byte) error {
+	_, err = s.copyChunks(ctx, job, job.Attempt, 0, func(_ int, data []byte) error {
 		_, err := w.Write(data)
 		return err //nolint:wrapcheck // caller's writer
 	})
 	return err
 }
 
-// copyChunks emits every stored chunk from seq on and returns the next seq.
-func (s *Service) copyChunks(ctx context.Context, job store.RunJob, from int, emit func(seq int, data []byte) error) (int, error) {
+// copyChunks emits every stored chunk of attempt from seq on and returns
+// the next seq.
+func (s *Service) copyChunks(ctx context.Context, job store.RunJob, attempt, from int, emit func(seq int, data []byte) error) (int, error) {
 	next := from
 	for {
-		chunks, err := s.store.ListJobLogChunks(ctx, job.OrgID, job.ID, next, listBatch)
+		chunks, err := s.store.ListJobLogChunks(ctx, job.OrgID, job.ID, attempt, next, listBatch)
 		if err != nil {
 			return next, fmt.Errorf("list log chunks: %w", err)
 		}
@@ -277,6 +287,12 @@ func (s *Service) copyChunks(ctx context.Context, job store.RunJob, from int, em
 
 // Event is one item of a live log stream.
 type Event struct {
+	// Attempt is the job attempt the event belongs to.
+	Attempt int
+	// NewAttempt starts the log of Attempt: it is sent first on every
+	// stream and again whenever the job is retried, after which chunk
+	// numbers restart at 0.
+	NewAttempt bool
 	// Seq and Data are set for a chunk.
 	Seq  int
 	Data []byte
@@ -285,10 +301,18 @@ type Event struct {
 	Status domain.JobStatus
 }
 
-// Stream emits stored chunks from seq from, then follows new chunks until
-// the job finishes, ctx ends, or MaxStream passes. It is woken by the bus
-// and polls as a fallback. emit errors (the client went away) end it.
-func (s *Service) Stream(ctx context.Context, ref JobRef, from int, emit func(Event) error) error {
+// Position is where a reconnecting stream resumes: after chunk Seq of
+// Attempt. A zero Attempt means the job's latest attempt.
+type Position struct {
+	Attempt int
+	Seq     int
+}
+
+// Stream emits stored chunks of the job's latest attempt from position
+// from (inclusive), then follows new chunks, and new attempts, until the
+// job finishes, ctx ends, or MaxStream passes. It is woken by the bus and
+// polls as a fallback. emit errors (the client went away) end it.
+func (s *Service) Stream(ctx context.Context, ref JobRef, from Position, emit func(Event) error) error {
 	ctx, span := tracer.Start(ctx, "logs.Stream")
 	defer span.End()
 	job, err := s.resolve(ctx, ref)
@@ -304,9 +328,18 @@ func (s *Service) Stream(ctx context.Context, ref JobRef, from int, emit func(Ev
 	defer unsubscribe()
 	poll := time.NewTicker(s.opts.StreamPoll)
 	defer poll.Stop()
-	next := max(from, 0)
+	attempt, next := job.Attempt, 0
+	if from.Attempt == 0 || from.Attempt == attempt {
+		next = max(from.Seq, 0)
+	}
+	if err := emit(Event{Attempt: attempt, NewAttempt: true}); err != nil {
+		return err
+	}
+	chunk := func(a int) func(seq int, data []byte) error {
+		return func(seq int, data []byte) error { return emit(Event{Attempt: a, Seq: seq, Data: data}) }
+	}
 	for {
-		next, err = s.copyChunks(ctx, job, next, func(seq int, data []byte) error { return emit(Event{Seq: seq, Data: data}) })
+		next, err = s.copyChunks(ctx, job, attempt, next, chunk(attempt))
 		if err != nil {
 			return err
 		}
@@ -317,13 +350,22 @@ func (s *Service) Stream(ctx context.Context, ref JobRef, from int, emit func(Ev
 		if err != nil {
 			return err
 		}
-		if cur.Status.IsTerminal() {
-			if _, err := s.copyChunks(ctx, job, next, func(seq int, data []byte) error {
-				return emit(Event{Seq: seq, Data: data})
-			}); err != nil {
+		if cur.Attempt != attempt || cur.Status.IsTerminal() {
+			// Drain the attempt: its lease has ended, so nothing more is
+			// written to it.
+			if _, err := s.copyChunks(ctx, job, attempt, next, chunk(attempt)); err != nil {
 				return err
 			}
-			return emit(Event{End: true, Status: cur.Status})
+		}
+		if cur.Attempt != attempt {
+			attempt, next = cur.Attempt, 0
+			if err := emit(Event{Attempt: attempt, NewAttempt: true}); err != nil {
+				return err
+			}
+			continue
+		}
+		if cur.Status.IsTerminal() {
+			return emit(Event{Attempt: attempt, End: true, Status: cur.Status})
 		}
 		select {
 		case <-ctx.Done():

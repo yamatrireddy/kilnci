@@ -75,28 +75,41 @@ func TestJobLogs_HeadersAndServerSentEvents(t *testing.T) {
 		t.Fatalf("raw bytes in the event stream: %q", body)
 	}
 	frames := strings.Split(strings.TrimSpace(body), "\n\n")
-	if len(frames) != 2 || !strings.HasPrefix(frames[0], "id: 0\nevent: chunk\ndata: ") || !strings.HasPrefix(frames[1], "event: end\ndata: ") {
+	if len(frames) != 3 || frames[0] != "event: attempt\ndata: {\"attempt\":1}" ||
+		!strings.HasPrefix(frames[1], "id: 1.0\nevent: chunk\ndata: ") || !strings.HasPrefix(frames[2], "event: end\ndata: ") {
 		t.Fatalf("frames = %q", frames)
 	}
 	var ev struct {
-		Seq  int    `json:"seq"`
-		Data string `json:"data"`
+		Attempt int    `json:"attempt"`
+		Seq     int    `json:"seq"`
+		Data    string `json:"data"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(frames[0], "id: 0\nevent: chunk\ndata: ")), &ev); err != nil {
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(frames[1], "id: 1.0\nevent: chunk\ndata: ")), &ev); err != nil || ev.Attempt != 1 {
 		t.Fatal(err)
 	}
 	if dec, _ := base64.StdEncoding.DecodeString(ev.Data); string(dec) != payload {
 		t.Fatalf("decoded chunk = %q", dec)
 	}
-	if !strings.Contains(frames[1], `"status":"succeeded"`) {
-		t.Fatalf("end frame = %q", frames[1])
+	if !strings.Contains(frames[2], `"status":"succeeded"`) {
+		t.Fatalf("end frame = %q", frames[2])
 	}
 
-	// Resuming after the last chunk returns only the end event.
-	rec = e.do(f.actors[viewer], http.MethodGet, base+"/stream", "", withHeader("Last-Event-ID", "0"))
-	if frames := strings.Split(strings.TrimSpace(rec.Body.String()), "\n\n"); len(frames) != 1 || !strings.HasPrefix(frames[0], "event: end") {
-		t.Fatalf("resumed frames = %q", frames)
+	// Resuming after the last chunk returns only the attempt and end events,
+	// whether the ID names the attempt or (legacy) only the chunk.
+	for _, id := range []string{"1.0", "0"} {
+		rec = e.do(f.actors[viewer], http.MethodGet, base+"/stream", "", withHeader("Last-Event-ID", id))
+		e.mustStatus(rec, http.StatusOK)
+		if frames := strings.Split(strings.TrimSpace(rec.Body.String()), "\n\n"); len(frames) != 2 || !strings.HasPrefix(frames[1], "event: end") {
+			t.Fatalf("resumed after %q frames = %q", id, frames)
+		}
 	}
-	rec = e.do(f.actors[viewer], http.MethodGet, base+"/stream", "", withHeader("Last-Event-ID", "x"))
-	e.mustStatus(rec, http.StatusUnprocessableEntity)
+	// An ID from an older attempt replays the latest attempt from the start.
+	rec = e.do(f.actors[viewer], http.MethodGet, base+"/stream", "", withHeader("Last-Event-ID", "7.0"))
+	if frames := strings.Split(strings.TrimSpace(rec.Body.String()), "\n\n"); len(frames) != 3 {
+		t.Fatalf("resumed from another attempt frames = %q", frames)
+	}
+	for _, id := range []string{"x", "1.x", "-1", "1.16384", "1.2.3"} {
+		rec = e.do(f.actors[viewer], http.MethodGet, base+"/stream", "", withHeader("Last-Event-ID", id))
+		e.mustStatus(rec, http.StatusUnprocessableEntity)
+	}
 }

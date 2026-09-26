@@ -35,39 +35,69 @@ func (q *Queries) AddJobLogBytes(ctx context.Context, arg AddJobLogBytesParams) 
 	return err
 }
 
-const getJobLogChunk = `-- name: GetJobLogChunk :one
-SELECT seq, size, sha256, object_key
+const countJobLogChunks = `-- name: CountJobLogChunks :one
+SELECT count(*)::integer
 FROM job_log_chunks
-WHERE org_id = $1 AND job_id = $2 AND seq = $3
+WHERE org_id = $1 AND job_id = $2 AND attempt = $3
+`
+
+type CountJobLogChunksParams struct {
+	OrgID   string
+	JobID   string
+	Attempt int32
+}
+
+// CountJobLogChunks runs after LockJobLogState as its own statement, so it
+// sees chunks committed by an append that held the lock before (a subquery
+// in the locking statement would read the snapshot taken before the wait).
+func (q *Queries) CountJobLogChunks(ctx context.Context, arg CountJobLogChunksParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countJobLogChunks, arg.OrgID, arg.JobID, arg.Attempt)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const getJobLogChunk = `-- name: GetJobLogChunk :one
+SELECT seq, size, sha256, sha256_request, object_key
+FROM job_log_chunks
+WHERE org_id = $1 AND job_id = $2 AND attempt = $3 AND seq = $4
 `
 
 type GetJobLogChunkParams struct {
-	OrgID string
-	JobID string
-	Seq   int32
+	OrgID   string
+	JobID   string
+	Attempt int32
+	Seq     int32
 }
 
 type GetJobLogChunkRow struct {
-	Seq       int32
-	Size      int32
-	Sha256    []byte
-	ObjectKey string
+	Seq           int32
+	Size          int32
+	Sha256        []byte
+	Sha256Request []byte
+	ObjectKey     string
 }
 
 func (q *Queries) GetJobLogChunk(ctx context.Context, arg GetJobLogChunkParams) (GetJobLogChunkRow, error) {
-	row := q.db.QueryRow(ctx, getJobLogChunk, arg.OrgID, arg.JobID, arg.Seq)
+	row := q.db.QueryRow(ctx, getJobLogChunk,
+		arg.OrgID,
+		arg.JobID,
+		arg.Attempt,
+		arg.Seq,
+	)
 	var i GetJobLogChunkRow
 	err := row.Scan(
 		&i.Seq,
 		&i.Size,
 		&i.Sha256,
+		&i.Sha256Request,
 		&i.ObjectKey,
 	)
 	return i, err
 }
 
 const getRunJob = `-- name: GetRunJob :one
-SELECT j.id, j.org_id, j.run_id, j.name, j.status, j.log_bytes, j.log_truncated
+SELECT j.id, j.org_id, j.run_id, j.name, j.status, j.attempt, j.log_bytes, j.log_truncated
 FROM jobs j
 JOIN runs r ON r.org_id = j.org_id AND r.id = j.run_id
 WHERE j.org_id = $1 AND r.project_id = $2
@@ -87,6 +117,7 @@ type GetRunJobRow struct {
 	RunID        string
 	Name         string
 	Status       string
+	Attempt      int32
 	LogBytes     int64
 	LogTruncated bool
 }
@@ -106,6 +137,7 @@ func (q *Queries) GetRunJob(ctx context.Context, arg GetRunJobParams) (GetRunJob
 		&i.RunID,
 		&i.Name,
 		&i.Status,
+		&i.Attempt,
 		&i.LogBytes,
 		&i.LogTruncated,
 	)
@@ -113,28 +145,36 @@ func (q *Queries) GetRunJob(ctx context.Context, arg GetRunJobParams) (GetRunJob
 }
 
 const insertJobLogChunk = `-- name: InsertJobLogChunk :exec
-INSERT INTO job_log_chunks (org_id, job_id, seq, size, sha256, object_key, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO job_log_chunks (org_id, job_id, attempt, seq, size, sha256, sha256_request, object_key, runner_id, lease_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type InsertJobLogChunkParams struct {
-	OrgID     string
-	JobID     string
-	Seq       int32
-	Size      int32
-	Sha256    []byte
-	ObjectKey string
-	CreatedAt time.Time
+	OrgID         string
+	JobID         string
+	Attempt       int32
+	Seq           int32
+	Size          int32
+	Sha256        []byte
+	Sha256Request []byte
+	ObjectKey     string
+	RunnerID      *string
+	LeaseID       []byte
+	CreatedAt     time.Time
 }
 
 func (q *Queries) InsertJobLogChunk(ctx context.Context, arg InsertJobLogChunkParams) error {
 	_, err := q.db.Exec(ctx, insertJobLogChunk,
 		arg.OrgID,
 		arg.JobID,
+		arg.Attempt,
 		arg.Seq,
 		arg.Size,
 		arg.Sha256,
+		arg.Sha256Request,
 		arg.ObjectKey,
+		arg.RunnerID,
+		arg.LeaseID,
 		arg.CreatedAt,
 	)
 	return err
@@ -143,14 +183,16 @@ func (q *Queries) InsertJobLogChunk(ctx context.Context, arg InsertJobLogChunkPa
 const listJobLogChunks = `-- name: ListJobLogChunks :many
 SELECT seq, size, object_key
 FROM job_log_chunks
-WHERE org_id = $1 AND job_id = $2 AND seq >= $3
+WHERE org_id = $1 AND job_id = $2 AND attempt = $3
+  AND seq >= $4
 ORDER BY seq
-LIMIT $4
+LIMIT $5
 `
 
 type ListJobLogChunksParams struct {
 	OrgID   string
 	JobID   string
+	Attempt int32
 	FromSeq int32
 	MaxRows int32
 }
@@ -165,6 +207,7 @@ func (q *Queries) ListJobLogChunks(ctx context.Context, arg ListJobLogChunksPara
 	rows, err := q.db.Query(ctx, listJobLogChunks,
 		arg.OrgID,
 		arg.JobID,
+		arg.Attempt,
 		arg.FromSeq,
 		arg.MaxRows,
 	)
@@ -188,29 +231,48 @@ func (q *Queries) ListJobLogChunks(ctx context.Context, arg ListJobLogChunksPara
 
 const lockJobLogState = `-- name: LockJobLogState :one
 
-SELECT j.log_bytes, j.log_truncated,
-    (SELECT count(*) FROM job_log_chunks c WHERE c.job_id = j.id)::integer AS chunks
+SELECT j.run_id, j.attempt, j.log_bytes, j.log_truncated
 FROM jobs j
-WHERE j.org_id = $1 AND j.id = $2
+WHERE j.org_id = $1 AND j.id = $2 AND j.status = 'running'
+  AND j.runner_id = $3 AND j.lease_id = $4
+  AND j.lease_expires_at > $5
 FOR UPDATE OF j
 `
 
 type LockJobLogStateParams struct {
-	OrgID string
-	ID    string
+	OrgID    string
+	ID       string
+	RunnerID *string
+	LeaseID  []byte
+	Now      *time.Time
 }
 
 type LockJobLogStateRow struct {
+	RunID        string
+	Attempt      int32
 	LogBytes     int64
 	LogTruncated bool
-	Chunks       int32
 }
 
 // SPDX-License-Identifier: Apache-2.0
-// LockJobLogState serializes appends for one job.
+// LockJobLogState serializes appends for one job and re-checks the lease
+// under the row lock, so a runner whose lease lapsed (and was re-leased)
+// cannot append between a check and the insert. Log bytes are those of the
+// current attempt.
 func (q *Queries) LockJobLogState(ctx context.Context, arg LockJobLogStateParams) (LockJobLogStateRow, error) {
-	row := q.db.QueryRow(ctx, lockJobLogState, arg.OrgID, arg.ID)
+	row := q.db.QueryRow(ctx, lockJobLogState,
+		arg.OrgID,
+		arg.ID,
+		arg.RunnerID,
+		arg.LeaseID,
+		arg.Now,
+	)
 	var i LockJobLogStateRow
-	err := row.Scan(&i.LogBytes, &i.LogTruncated, &i.Chunks)
+	err := row.Scan(
+		&i.RunID,
+		&i.Attempt,
+		&i.LogBytes,
+		&i.LogTruncated,
+	)
 	return i, err
 }

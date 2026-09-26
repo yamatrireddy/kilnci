@@ -27,6 +27,9 @@ SET status = 'running',
     lease_id = sqlc.arg(lease_id),
     lease_expires_at = sqlc.arg(lease_expires_at),
     attempt = attempt + 1,
+    -- Each attempt has its own log (ADR-0007 §1).
+    log_bytes = 0,
+    log_truncated = false,
     started_at = sqlc.arg(now),
     cancel_requested = false
 WHERE jobs.org_id = sqlc.arg(org_id) AND jobs.id = sqlc.arg(id) AND jobs.status = 'queued'

@@ -89,7 +89,10 @@ func newEnv(t *testing.T) *env {
 	}
 	az := authz.NewAuthorizer(st)
 	rec := audit.NewRecorder(st, gen, clk.now)
-	sched := scheduler.New(st, logging.Discard(), scheduler.Options{}, clk.now)
+	// The clock runs hours behind, so a default lease would already have
+	// lapsed for other packages' tests, whose reapers scan the shared
+	// database; a lease that outlives the offset keeps them off these jobs.
+	sched := scheduler.New(st, logging.Discard(), scheduler.Options{LeaseTTL: 24 * time.Hour}, clk.now)
 	runnerSvc := runners.NewService(st, az, rec, ca, gen, clk.now)
 	runSvc := runs.NewService(st, az, rec, sched.Progressor(), gen, clk.now)
 
@@ -232,7 +235,8 @@ func TestRunnerProtocol_EndToEnd(t *testing.T) {
 		t.Fatalf("empty lease = %v %v", empty, err)
 	}
 
-	pl, _ := spec.Parse([]byte("version: 1\njobs:\n  build:\n    image: alpine\n    runs-on: [linux]\n    env: {A: b}\n    steps: [{name: Build, run: make}]\n"))
+	// The timeout outlasts the clock's offset, for the same reason as the lease TTL.
+	pl, _ := spec.Parse([]byte("version: 1\njobs:\n  build:\n    image: alpine\n    runs-on: [linux]\n    timeout: 12h\n    env: {A: b}\n    steps: [{name: Build, run: make}]\n"))
 	run, err := e.runs.CreateRun(ctx, runs.NewRun{OrgID: e.org.ID, ProjectID: e.project.ID, Event: domain.EventPush,
 		Ref: "refs/heads/main", Branch: "main", CommitSHA: strings.Repeat("d", 40), Trusted: true, Pipeline: pl})
 	if err != nil {

@@ -19,6 +19,9 @@ SET status = 'running',
     lease_id = $2,
     lease_expires_at = $3,
     attempt = attempt + 1,
+    -- Each attempt has its own log (ADR-0007 §1).
+    log_bytes = 0,
+    log_truncated = false,
     started_at = $4,
     cancel_requested = false
 WHERE jobs.org_id = $5 AND jobs.id = $6 AND jobs.status = 'queued'

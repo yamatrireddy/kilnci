@@ -4,7 +4,7 @@
 // Docker containers. This file only wires components together.
 //
 //	kiln-runner register --server HOST:PORT --ca-file ca.crt --token-file FILE --name NAME --state-dir DIR
-//	kiln-runner run --state-dir DIR --egress-policy host-enforced|none
+//	kiln-runner run --state-dir DIR --egress-policy host-enforced|none [--job-disk-limit 10G|off] [--registry-allowlist HOST[:PORT],...]
 package main
 
 import (
@@ -51,7 +51,7 @@ func mainCode() int {
 
 const usage = `usage:
   kiln-runner register --server HOST:PORT --ca-file ca.crt --token-file FILE|- --name NAME --state-dir DIR
-  kiln-runner run --state-dir DIR --egress-policy host-enforced|none`
+  kiln-runner run --state-dir DIR --egress-policy host-enforced|none [--job-disk-limit 10G|off] [--registry-allowlist HOST[:PORT],...]`
 
 func run(ctx context.Context, args []string, stdin io.Reader, stderr io.Writer) error {
 	if len(args) == 0 {
@@ -172,11 +172,25 @@ func runAgent(ctx context.Context, args []string, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	stateDir := fs.String("state-dir", "", "directory written by `kiln-runner register`")
 	egress := fs.String("egress-policy", "", "host-enforced: the host firewall blocks metadata and private ranges for job containers (see docs); none: accept the risk (every job log shows a warning)")
+	diskLimit := fs.String("job-disk-limit", "10G", "per-job cap on each container's writable layer and the workspace volume; "+
+		"needs Docker's overlay2 driver on XFS mounted with pquota. off: no limit (a job can fill the Docker data root)")
+	registries := fs.String("registry-allowlist", "", "comma-separated registries (exact host or host:port) jobs may pull from "+
+		"although they are on loopback, private, or link-local addresses")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
 	if *stateDir == "" || (*egress != "host-enforced" && *egress != "none") {
 		return errors.New(usage)
+	}
+	diskBytes, diskOff, err := docker.ParseDiskLimit(*diskLimit)
+	if err != nil {
+		return err //nolint:wrapcheck // contextual
+	}
+	var allowlist []string
+	for r := range strings.SplitSeq(*registries, ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			allowlist = append(allowlist, r)
+		}
 	}
 	log := slog.New(slog.NewJSONHandler(stderr, nil))
 	id, err := identity.Load(*stateDir)
@@ -189,9 +203,20 @@ func runAgent(ctx context.Context, args []string, stderr io.Writer) error {
 		return fmt.Errorf("docker client: %w", err)
 	}
 	defer func() { _ = docker0.Close() }()
-	exec, err := docker.New(docker0, docker.Options{Log: log})
+	exec, err := docker.New(docker0, docker.Options{
+		DiskLimitBytes: diskBytes, DisableDiskLimit: diskOff, RegistryAllowlist: allowlist, Log: log,
+	})
 	if err != nil {
 		return err //nolint:wrapcheck // contextual
+	}
+	if err := exec.Preflight(ctx); err != nil {
+		return err //nolint:wrapcheck // contextual
+	}
+	if diskOff {
+		log.WarnContext(ctx, "job disk limit is off: a job can fill the Docker data root")
+	}
+	if len(allowlist) > 0 {
+		log.InfoContext(ctx, "private registries allowed for job images", "registries", allowlist)
 	}
 	conn := &grpcConn{id: id}
 	if err := conn.dial(); err != nil {

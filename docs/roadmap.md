@@ -29,13 +29,33 @@ feature has to invent its own auth, error model, config, or UI conventions.
 and projects, cross-org access returns 404 in the authz matrix, and `make generate
 lint test security` is green.
 
-## Phase 1 — CI core
+## Phase 1 — CI core (in progress)
 
 Pipeline spec + safe YAML loader (fuzzed), DAG planning, scheduler with leases,
 runner protocol (`proto/`, mTLS, pull-only), Docker executor (hardened defaults),
 log streaming via object storage + NATS with runner-side masking, VCS webhooks
 (GitHub first), commit statuses, runs UI with the sanitizing log viewer.
 Each item crossing a trust boundary (B1, B2, B3, B6) gets an ADR first.
+
+| Slice | Scope | Status |
+|---|---|---|
+| 0. ADRs | ADR-0005 runner protocol (B2), ADR-0006 Docker sandbox (B3), ADR-0007 log pipeline (amends invariant 4: SSE), ADR-0008 GitHub App (B1, B6); `docs/specs/pipeline.md` | done |
+| 1. Engine | `engine/spec` safe loader (limits, malicious fixtures, `FuzzParse`), `engine/dag`, `engine/states.go` transitions | done |
+| 2. Runs | Runs and jobs persisted per org; run read, cancel, approve, and lint APIs | done |
+| 3. Scheduler | Leases with heartbeats, completion, reaping, per-runner capacity | done |
+| 4. Runner protocol | gRPC over mTLS, pull-only; registration tokens, CSR proof of possession, certificate renewal and revocation | done |
+| 5. Docker executor + masking | Hardened sandbox defaults, per-job network and volume, clone container; runner-side streaming masker | done |
+| 6. Logs | Chunks in object storage (filesystem/S3), metadata in PostgreSQL, live tails over NATS (in-process bus in `--embedded`) → SSE | done |
+| 7. Runner agent | `kiln-runner` CLI, identity management, lease loop, log upload, egress-policy acknowledgement | done |
+| 8. GitHub | GitHub App, signature-verified webhook ingest and queue, push/PR triggers, fork detection, manual runs, commit-status outbox | done |
+| 9. Security review | Runner and log-pipeline review findings closed (see the PR that closed them and `docs/threat-model.md`) | done |
+| 10. Runs UI | Runs and jobs pages, sanitizing ANSI log viewer (T-09) | not started |
+| 11. `kiln lint` CLI | `cli/` wrapper over the lint API | not started |
+
+**Exit criteria:** a push to a linked GitHub repository creates a run, jobs execute
+on a registered runner in the hardened Docker sandbox, masked logs stream live to
+the runs UI, the commit status reflects the result, and `make generate lint test
+test-integration security` is green.
 
 ## Phase 2 — Secrets and trust
 

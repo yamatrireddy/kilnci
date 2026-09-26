@@ -20,6 +20,7 @@ import (
 	runnerv1 "github.com/yamatrireddy/kilnci/proto/gen/go/kiln/runner/v1"
 	"github.com/yamatrireddy/kilnci/runner/executor"
 	"github.com/yamatrireddy/kilnci/runner/internal/identity"
+	"github.com/yamatrireddy/kilnci/runner/internal/mask"
 )
 
 const secret = "ghs_supersecretinstallationtoken"
@@ -187,6 +188,23 @@ func TestAgent_ExecutorErrorBecomesFailure(t *testing.T) {
 	fc := &fakeClient{jobs: []*runnerv1.Job{job()}, truncateAt: -1}
 	runOnce(t, fc, errExec{}, Options{})
 	if len(fc.completed) != 1 || fc.completed[0].GetResult() != runnerv1.JobResult_JOB_RESULT_FAILED || fc.completed[0].ExitCode != nil {
+		t.Fatalf("completed = %+v", fc.completed)
+	}
+}
+
+// TestAgent_RefusesJobWhoseValuesAreTooLargeToMask: a job is failed
+// without running when its sensitive values exceed the masker's limits.
+func TestAgent_RefusesJobWhoseValuesAreTooLargeToMask(t *testing.T) {
+	j := job()
+	j.MaskValues = []string{strings.Repeat("v", mask.MaxValueBytes+1)}
+	fc := &fakeClient{jobs: []*runnerv1.Job{j}, truncateAt: -1}
+	ex := &fakeExec{}
+	runOnce(t, fc, ex, Options{})
+	if ex.got.ID != "" {
+		t.Fatal("the executor ran the job")
+	}
+	if len(fc.completed) != 1 || fc.completed[0].GetResult() != runnerv1.JobResult_JOB_RESULT_FAILED ||
+		!strings.Contains(fc.completed[0].GetFailureReason(), "too large to mask") {
 		t.Fatalf("completed = %+v", fc.completed)
 	}
 }

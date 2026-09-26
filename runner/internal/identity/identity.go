@@ -66,21 +66,51 @@ func (id *Identity) RunnerID() string { return id.runnerID }
 // Server returns the server address (host:port).
 func (id *Identity) Server() string { return id.server }
 
+// openState opens the state directory, creating it (mode 0700) if needed.
+// MkdirAll does not tighten an existing directory, so the directory is then
+// checked: it must be a real directory, not a symlink, and on unix owned by
+// the effective user with no group or other permissions.
 func openState(dir string) (*os.Root, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("state dir: %w", err)
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 || !fi.IsDir() {
+		return nil, fmt.Errorf("state dir %s must be a directory, not a symlink or file", dir)
+	}
+	if err := checkStateDirAccess(dir, fi); err != nil {
+		return nil, err
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, fmt.Errorf("state dir: %w", err)
 	}
+	// The directory checked must be the one opened.
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(fi, opened) {
+		_ = root.Close()
+		return nil, fmt.Errorf("state dir %s changed while it was opened", dir)
+	}
 	return root, nil
 }
 
+// writeFile atomically replaces name with data. The temporary file is
+// created exclusively, after removing any stale one (whose mode would
+// otherwise be kept), and chmodded so the umask cannot change its mode.
 func writeFile(root *os.Root, name string, data []byte, mode os.FileMode) error {
 	tmp := name + ".tmp"
-	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err := root.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("write %s: remove stale temporary file: %w", name, err)
+	}
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write %s: %w", name, err)
 	}
 	if _, err := f.Write(data); err != nil {

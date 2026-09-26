@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# osv-scanner ignores for the desktop shell's Cargo.lock. All entries are
+# transitive dependencies of Tauri 2's Linux backend (tao/wry/webkit2gtk use
+# the GTK3 gtk-rs bindings, whose last line is 0.18; the 0.20+ glib that fixes
+# RUSTSEC-2024-0429 belongs to the GTK4 bindings Tauri does not use), or of
+# urlpattern. There is no upgrade path until Tauri moves off GTK3. Every entry
+# needs a reason and an expiry so it is revisited. Maintainer approval: PR #7
+# (security-standards: scanner suppressions).
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+ignoreUntil = 2026-12-31
+reason = "glib 0.18.5 unsoundness in VariantStrIter (Iterator/DoubleEndedIterator impls). Kiln's Rust code never uses glib Variant APIs; glib is only reached through Tauri's GTK3 webview backend. Fixed only in glib 0.20 (GTK4 bindings)."
+
+[[IgnoredVulns]]
+id = "GHSA-wrw7-89jp-8q8g"
+ignoreUntil = 2026-12-31
+reason = "GHSA alias of RUSTSEC-2024-0429 (see above)."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2026-12-31
+reason = "proc-macro-error is unmaintained (informational, no vulnerability); build-time proc macro used by glib-macros and gtk3-macros 0.18 under Tauri's GTK3 backend. Not in the shipped binary's runtime code."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0075"
+ignoreUntil = 2026-12-31
+reason = "unic-char-range is unmaintained (informational, no vulnerability); transitive via urlpattern 0.3 under Tauri."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0080"
+ignoreUntil = 2026-12-31
+reason = "unic-common is unmaintained (informational, no vulnerability); transitive via urlpattern 0.3 under Tauri."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0081"
+ignoreUntil = 2026-12-31
+reason = "unic-char-property is unmaintained (informational, no vulnerability); transitive via urlpattern 0.3 under Tauri."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0098"
+ignoreUntil = 2026-12-31
+reason = "unic-ucd-version is unmaintained (informational, no vulnerability); transitive via urlpattern 0.3 under Tauri."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0100"
+ignoreUntil = 2026-12-31
+reason = "unic-ucd-ident is unmaintained (informational, no vulnerability); transitive via urlpattern 0.3 under Tauri."

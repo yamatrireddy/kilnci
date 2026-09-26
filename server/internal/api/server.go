@@ -43,17 +43,17 @@ type Deps struct {
 }
 
 type server struct {
-	log     *slog.Logger
-	checks  map[string]ReadinessCheck
-	errs    errorWriter
-	ips     clientIPResolver
-	auth    AuthService
-	orgs    OrgService
-	runs    RunService
-	runners RunnerService
-	logs    LogService
-	vcs     VCSService
-	streams streamLimiter
+	log       *slog.Logger
+	checks    map[string]ReadinessCheck
+	errs      errorWriter
+	ips       clientIPResolver
+	auth      AuthService
+	orgs      OrgService
+	runs      RunService
+	runners   RunnerService
+	logs      LogService
+	vcs       VCSService
+	logLimits *logLimiter
 }
 
 // NewHandler builds the complete, validated HTTP handler. It returns an error
@@ -66,16 +66,17 @@ func NewHandler(d Deps) (http.Handler, *Router, error) {
 		return nil, nil, errors.New("api: MaxBodyBytes must be positive")
 	}
 	s := &server{
-		log:     d.Log,
-		checks:  d.Checks,
-		errs:    errorWriter{log: d.Log},
-		ips:     clientIPResolver{trusted: d.Options.TrustedProxies},
-		auth:    d.Auth,
-		orgs:    d.Orgs,
-		runs:    d.Runs,
-		runners: d.Runners,
-		logs:    d.Logs,
-		vcs:     d.VCS,
+		log:       d.Log,
+		checks:    d.Checks,
+		errs:      errorWriter{log: d.Log},
+		ips:       clientIPResolver{trusted: d.Options.TrustedProxies},
+		auth:      d.Auth,
+		orgs:      d.Orgs,
+		runs:      d.Runs,
+		runners:   d.Runners,
+		logs:      d.Logs,
+		vcs:       d.VCS,
+		logLimits: newLogLimiter(),
 	}
 
 	spec, err := loadSpec()

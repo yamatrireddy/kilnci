@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# osv-scanner ignores for the pinned developer tools module (tools/go.mod).
+# tools/ builds only local and CI tooling (linters, scanners, code
+# generators); none of it ships in Kiln binaries, images, or the desktop app.
+# Every entry needs a reason and an expiry so it is revisited. Maintainer
+# approval: PR #7 (security-standards: scanner suppressions).
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2026-12-31
+reason = "golang.org/x/crypto is pulled in transitively by dev tools only; no fixed release exists yet (osv lists none). Kiln's server and runner modules pin their own x/crypto and are scanned separately. Bump tools/ as soon as a fix is released."

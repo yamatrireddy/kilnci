@@ -38,7 +38,10 @@ kiln-runner register --server runners.kiln.example.com:9443 \
 ```
 
 The runner generates its own key (it never leaves the host), pins the CA,
-and stores its certificate in the state directory. Certificates last 24
+and stores its certificate in the state directory. The state directory must
+be a real directory (not a symlink), owned by the user the runner runs as,
+with mode `0700`; the runner refuses to use it otherwise. On Windows,
+restrict the directory's ACL to that user yourself. Certificates last 24
 hours and are renewed automatically; if the state directory is copied to
 another machine and both use it, the server detects the reuse and revokes
 the runner.
@@ -80,14 +83,38 @@ kiln-runner run --state-dir /var/lib/kiln-runner --egress-policy host-enforced
 `--egress-policy none` runs without these rules; every job log then starts
 with a warning. Use it only for isolated development machines.
 
-## 4. What the sandbox enforces
+Image pulls are made by `dockerd` from the host's network, which the
+`DOCKER-USER` rules above do not cover. The runner therefore refuses job
+images from registries on loopback, private, link-local, CGNAT, or metadata
+addresses (by literal address or by resolving the name; a name that does
+not resolve is refused too). Allow an internal registry explicitly with
+`--registry-allowlist registry.internal:5000,…` (exact `host[:port]`).
+`dockerd` resolves the name again itself, and registry mirrors configured
+on the daemon are not checked, so restrict `dockerd`'s own egress as well.
+
+## 4. Limit job disk use
+
+Each job's container writable layer and workspace volume are capped by
+`--job-disk-limit` (default `10G`). Docker can only enforce this with the
+`overlay2` storage driver on an XFS data root mounted with `pquota` (for
+example `/var/lib/docker` on its own XFS filesystem with
+`defaults,pquota`). The runner checks the driver at startup and before
+each job, and refuses to run jobs otherwise; note that the containerd image
+store, the default on new Docker installs, ignores the limit and is
+refused. `--job-disk-limit=off` accepts unlimited disk use: a job can then
+fill the Docker data root and break other jobs on the host. Keep the Docker
+data root on a dedicated filesystem either way.
+
+## 5. What the sandbox enforces
 
 Each job gets its own bridge network (no inter-container traffic) and
-workspace volume; the job container runs as UID 1000 with all capabilities
+workspace volume; the job container runs as UID 65532 (not a UID a person
+on the host is likely to have; enable Docker's `userns-remap` to map it to
+an unprivileged range as well) with all capabilities
 dropped, `no-new-privileges`, the default seccomp/AppArmor profiles, an
-init process, and limits (4 GiB memory without swap, 2 CPUs, 1024 PIDs). It
-never gets host namespaces, host mounts, `--privileged`, or the Docker
-socket. Images for untrusted jobs are pulled anonymously. The repository is
+init process, and limits (4 GiB memory without swap, 2 CPUs, 1024 PIDs,
+disk as above). It never gets host namespaces, host mounts, `--privileged`,
+or the Docker socket. Images are pulled anonymously for every job. The repository is
 fetched at the exact commit by a separate clone container; the fetch
 credential never reaches the job container and is masked in logs.
 Everything is removed when the job ends.
