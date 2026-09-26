@@ -380,6 +380,8 @@ export interface paths {
          * @description Raw bytes as the job wrote them (ANSI escapes included). Clients must
          *     render them through the sanitizing log viewer, never as HTML. Served
          *     with `Content-Security-Policy: sandbox` and `nosniff` (ADR-0007).
+         *     Returns the job's latest attempt. Concurrent downloads are capped
+         *     per user, per org, and in total (429).
          */
         get: operations["getJobLog"];
         put?: never;
@@ -404,10 +406,18 @@ export interface paths {
         };
         /**
          * Live log tail as Server-Sent Events (ADR-0007)
-         * @description Replays stored chunks after `Last-Event-ID`, then follows new ones
-         *     until the job finishes. `chunk` events carry `{"seq":n,"data":"<base64>"}`;
-         *     a final `end` event carries `{"status":"<job status>"}`. Streams
-         *     close after 30 minutes; reconnect with `Last-Event-ID`.
+         * @description Streams the log of the job's latest attempt (a job retried after
+         *     its runner stopped responding starts a new log). An `attempt` event
+         *     carrying `{"attempt":n}` starts every stream and is sent again when
+         *     the job is retried; chunk numbers then restart at 0. `chunk` events
+         *     have ID `<attempt>.<seq>` and carry
+         *     `{"attempt":n,"seq":n,"data":"<base64>"}`; a final `end` event
+         *     carries `{"status":"<job status>"}`. Streams close after 30
+         *     minutes; reconnect with `Last-Event-ID` to replay only later chunks
+         *     (an ID from an earlier attempt replays the latest attempt from the
+         *     start; a bare `<seq>` refers to the latest attempt). Concurrent
+         *     streams and downloads are capped per user, per org, and in total
+         *     (429).
          */
         get: operations["streamJobLog"];
         put?: never;
@@ -1773,7 +1783,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                "Last-Event-ID"?: number;
+                "Last-Event-ID"?: string;
             };
             path: {
                 orgSlug: components["parameters"]["OrgSlug"];

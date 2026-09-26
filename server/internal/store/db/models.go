@@ -132,13 +132,17 @@ type Job struct {
 }
 
 type JobLogChunk struct {
-	OrgID     string
-	JobID     string
-	Seq       int32
-	Size      int32
-	Sha256    []byte
-	ObjectKey string
-	CreatedAt time.Time
+	OrgID         string
+	JobID         string
+	Seq           int32
+	Size          int32
+	Sha256        []byte
+	ObjectKey     string
+	CreatedAt     time.Time
+	Attempt       int32
+	RunnerID      *string
+	LeaseID       []byte
+	Sha256Request []byte
 }
 
 type LoginState struct {

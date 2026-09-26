@@ -825,7 +825,7 @@ type CreateRunParams struct {
 
 // StreamJobLogParams defines parameters for StreamJobLog.
 type StreamJobLogParams struct {
-	LastEventID *int `json:"Last-Event-ID,omitempty"`
+	LastEventID *string `json:"Last-Event-ID,omitempty"`
 }
 
 // ListRunnersParams defines parameters for ListRunners.
