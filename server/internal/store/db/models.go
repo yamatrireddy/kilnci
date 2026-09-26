@@ -43,6 +43,23 @@ type AuditEvent struct {
 	Hash       []byte
 }
 
+type CommitStatusOutbox struct {
+	ID             string
+	OrgID          string
+	RunID          string
+	RepoID         int64
+	InstallationID int64
+	CommitSha      string
+	State          string
+	Context        string
+	Description    string
+	TargetUrl      string
+	CreatedAt      time.Time
+	Attempts       int32
+	NextAttemptAt  time.Time
+	SentAt         *time.Time
+}
+
 type DesktopAccessToken struct {
 	TokenHash []byte
 	GrantID   string
@@ -74,6 +91,15 @@ type DesktopRefreshToken struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time
 	UsedAt    *time.Time
+}
+
+type GithubInstallation struct {
+	InstallationID int64
+	OrgID          string
+	AccountLogin   string
+	BoundBy        *string
+	CreatedAt      time.Time
+	DisabledAt     *time.Time
 }
 
 type Job struct {
@@ -156,6 +182,21 @@ type ProjectRunCounter struct {
 	LastNumber int64
 }
 
+type Repository struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	InstallationID int64
+	RepoID         int64
+	FullName       string
+	CloneUrl       string
+	DefaultBranch  string
+	Private        bool
+	LinkedBy       *string
+	CreatedAt      time.Time
+	DisabledAt     *time.Time
+}
+
 type Run struct {
 	ID             string
 	OrgID          string
@@ -230,4 +271,18 @@ type WebSession struct {
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
 	RevokedAt  *time.Time
+}
+
+type WebhookDelivery struct {
+	ID            string
+	DeliveryID    string
+	BodySha256    []byte
+	Event         string
+	Payload       []byte
+	ReceivedAt    time.Time
+	Status        string
+	Attempts      int32
+	NextAttemptAt time.Time
+	ProcessedAt   *time.Time
+	Outcome       string
 }

@@ -61,6 +61,7 @@ type Config struct {
 	Runner   Runner
 	Logs     Logs
 	NATS     NATS
+	GitHub   GitHub
 }
 
 // HTTP configures the listener and HTTP behavior.
@@ -181,6 +182,18 @@ type NATS struct {
 	Insecure bool
 }
 
+// GitHub configures the GitHub App (ADR-0008). Empty AppID disables it.
+type GitHub struct {
+	AppID int64
+	// PrivateKey is the App's PEM private key (from KILN_GITHUB_APP_PRIVATE_KEY_FILE).
+	PrivateKey    Secret
+	WebhookSecret Secret
+	APIURL        string
+}
+
+// Enabled reports whether the GitHub App is configured.
+func (g GitHub) Enabled() bool { return g.AppID > 0 }
+
 // Tracing configures OpenTelemetry export.
 type Tracing struct {
 	// OTLPEndpoint (host:port) enables OTLP/HTTP trace export when set.
@@ -273,6 +286,11 @@ func Load(src Source, embedded bool) (*Config, error) {
 	c.NATS.User = p.str("KILN_NATS_USER", "")
 	c.NATS.Password = p.secret("KILN_NATS_PASSWORD")
 	c.NATS.Insecure = p.bool("KILN_NATS_INSECURE", false)
+
+	c.GitHub.AppID = p.int64("KILN_GITHUB_APP_ID", 0)
+	c.GitHub.PrivateKey = p.secretFile("KILN_GITHUB_APP_PRIVATE_KEY_FILE")
+	c.GitHub.WebhookSecret = p.secret("KILN_GITHUB_WEBHOOK_SECRET")
+	c.GitHub.APIURL = p.str("KILN_GITHUB_API_URL", "https://api.github.com")
 
 	c.Tracing.OTLPEndpoint = p.str("KILN_OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	c.Tracing.Insecure = p.bool("KILN_OTEL_EXPORTER_OTLP_INSECURE", false)
@@ -414,6 +432,21 @@ func (c *Config) validate() []error {
 		}
 	}
 
+	if c.GitHub.AppID < 0 {
+		add("KILN_GITHUB_APP_ID must be a positive integer")
+	}
+	if c.GitHub.Enabled() {
+		if c.GitHub.PrivateKey.IsZero() {
+			add("KILN_GITHUB_APP_PRIVATE_KEY_FILE is required when KILN_GITHUB_APP_ID is set")
+		}
+		if len(c.GitHub.WebhookSecret.Reveal()) < 20 {
+			add("KILN_GITHUB_WEBHOOK_SECRET (or _FILE) of at least 20 characters is required when KILN_GITHUB_APP_ID is set")
+		}
+		if u, err := url.Parse(c.GitHub.APIURL); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+			add("KILN_GITHUB_API_URL must be an https URL")
+		}
+	}
+
 	if c.Runner.Enabled() {
 		if len(c.Runner.Hostnames) == 0 {
 			add("KILN_RUNNER_HOSTNAMES is required when KILN_RUNNER_CA_DIR is set (names runners use to reach this server)")
@@ -493,6 +526,21 @@ func (p *parser) secret(key string) Secret {
 		return NewSecret(v)
 	}
 	return Secret{}
+}
+
+// secretFile reads a secret that is only accepted from a file (e.g. a
+// private key), never from the environment directly.
+func (p *parser) secretFile(key string) Secret {
+	path, ok := p.get(key)
+	if !ok {
+		return Secret{}
+	}
+	b, err := p.src.ReadFile(path)
+	if err != nil {
+		p.errs = append(p.errs, fmt.Errorf("%s: cannot read file", key))
+		return Secret{}
+	}
+	return NewSecret(string(b))
 }
 
 func (p *parser) url(key string) *url.URL {

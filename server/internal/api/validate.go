@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -46,6 +47,14 @@ var validationOptions = &openapi3filter.Options{
 	MultiError:         true,
 }
 
+// webhookValidationOptions skip the body: webhook signatures must be
+// verified before the body is parsed at all (SS §11, ADR-0008 §3).
+var webhookValidationOptions = &openapi3filter.Options{
+	AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+	MultiError:         true,
+	ExcludeRequestBody: true,
+}
+
 // validate returns nil, a *domain.ValidationError naming the invalid fields
 // (never echoing their values), or an internal error if the route is missing
 // from the spec (a conformance bug, caught by TestRoutesMatchSpec).
@@ -54,7 +63,11 @@ func (v *specValidator) validate(r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("route %s %s missing from OpenAPI spec: %w", r.Method, stateFrom(r).routeName(), err)
 	}
-	in := &openapi3filter.RequestValidationInput{Request: r, PathParams: params, Route: route, Options: validationOptions}
+	opts := validationOptions
+	if strings.HasPrefix(r.URL.Path, webhookPrefix) {
+		opts = webhookValidationOptions
+	}
+	in := &openapi3filter.RequestValidationInput{Request: r, PathParams: params, Route: route, Options: opts}
 	err = openapi3filter.ValidateRequest(r.Context(), in)
 	if err == nil {
 		return nil

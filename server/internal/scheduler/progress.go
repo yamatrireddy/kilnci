@@ -34,11 +34,22 @@ type ProgressStore interface {
 	UpdateRunStatus(ctx context.Context, c store.RunStatusChange) error
 }
 
-// Progressor advances runs. It is safe for concurrent use.
-type Progressor struct {
-	store ProgressStore
-	now   func() time.Time
+// RunObserver is told about every run status change, inside the
+// transaction that made it, so side effects (commit statuses) commit or roll
+// back with the change.
+type RunObserver interface {
+	RunChanged(ctx context.Context, run domain.Run) error
 }
+
+// Progressor advances runs. It is safe for concurrent use once built.
+type Progressor struct {
+	store    ProgressStore
+	now      func() time.Time
+	observer RunObserver
+}
+
+// SetObserver registers o; call it during wiring, before any use.
+func (p *Progressor) SetObserver(o RunObserver) { p.observer = o }
 
 // NewProgressor returns a Progressor. now may be nil (time.Now).
 func NewProgressor(s ProgressStore, now func() time.Time) *Progressor {
@@ -164,6 +175,9 @@ func (p *Progressor) setRun(ctx context.Context, r *domain.Run, to domain.RunSta
 	}
 	if c.FinishedAt != nil && r.FinishedAt == nil {
 		r.FinishedAt = c.FinishedAt
+	}
+	if p.observer != nil {
+		return p.observer.RunChanged(ctx, *r)
 	}
 	return nil
 }

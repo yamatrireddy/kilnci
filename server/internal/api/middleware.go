@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -232,14 +233,25 @@ func cors(allowed []string) middleware {
 }
 
 // bodyLimit caps request bodies; handlers see *http.MaxBytesError past the limit.
+// webhookPrefix is where signature-verified webhook ingest lives; its
+// bodies may be larger (SS §5) and are verified before parsing.
+const webhookPrefix = "/api/v1/webhooks/"
+
+// webhookMaxBodyBytes is the webhook body limit (SS §5: 5 MiB).
+const webhookMaxBodyBytes = 5 << 20
+
 func bodyLimit(maxBytes int64) middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.ContentLength > maxBytes {
+			limit := maxBytes
+			if strings.HasPrefix(r.URL.Path, webhookPrefix) {
+				limit = webhookMaxBodyBytes
+			}
+			if r.ContentLength > limit {
 				writeProblem(r.Context(), w, problemKind{ProblemPayloadTooLarge, "Request body too large", http.StatusRequestEntityTooLarge}, nil)
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			next.ServeHTTP(w, r)
 		})
 	}

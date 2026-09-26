@@ -162,6 +162,18 @@ func TestLoad_Rejects(t *testing.T) {
 			e["KILN_NATS_INSECURE"] = "true"
 		}, "KILN_NATS_INSECURE"},
 		{"tiny log limit", func(e map[string]string) { e["KILN_LOG_MAX_BYTES"] = "10" }, "KILN_LOG_MAX_BYTES"},
+		{"github without key", func(e map[string]string) {
+			e["KILN_GITHUB_APP_ID"] = "42"
+			e["KILN_GITHUB_WEBHOOK_SECRET"] = "0123456789abcdefghijKLMN"
+		}, "KILN_GITHUB_APP_PRIVATE_KEY_FILE is required"},
+		{"github weak webhook secret", func(e map[string]string) {
+			e["KILN_GITHUB_APP_ID"] = "42"
+			e["KILN_GITHUB_WEBHOOK_SECRET"] = "short"
+		}, "at least 20 characters"},
+		{"github http api", func(e map[string]string) {
+			e["KILN_GITHUB_APP_ID"] = "42"
+			e["KILN_GITHUB_API_URL"] = "http://ghe.example.com/api/v3"
+		}, "KILN_GITHUB_API_URL"},
 		{"runner ca without hostnames", func(e map[string]string) { e["KILN_RUNNER_CA_DIR"] = "/ca" }, "KILN_RUNNER_HOSTNAMES is required"},
 		{"bad runner hostname", func(e map[string]string) {
 			e["KILN_RUNNER_CA_DIR"] = "/ca"

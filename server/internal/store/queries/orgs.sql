@@ -57,3 +57,7 @@ JOIN users u ON u.id = m.user_id
 WHERE m.org_id = sqlc.arg(org_id) AND m.user_id > sqlc.arg(after_user_id)
 ORDER BY m.user_id
 LIMIT sqlc.arg(max_rows);
+
+-- GetOrgBySlug is for instance-admin operations only (no membership check).
+-- name: GetOrgBySlug :one
+SELECT id, slug, name, created_at FROM orgs WHERE slug = $1;

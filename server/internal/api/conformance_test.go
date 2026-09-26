@@ -15,6 +15,7 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
+	"github.com/yamatrireddy/kilnci/server/internal/service/vcs"
 )
 
 // Stubs satisfy the service interfaces so every route registers.
@@ -49,12 +50,14 @@ type stubRunners struct{ runners.Service }
 
 type stubLogs struct{ logs.Service }
 
+type stubVCS struct{ vcs.Service }
+
 // TestRoutesMatchSpec enforces CLAUDE.md invariant 1 and the deny-by-default
 // rule: every OpenAPI operation is routed with exactly its x-kiln-permission,
 // and no route exists that the spec does not declare.
 func TestRoutesMatchSpec(t *testing.T) {
 	d := testDeps(t, nil)
-	d.Auth, d.Orgs, d.Runs, d.Runners, d.Logs = stubAuth{}, &stubOrgs{}, &stubRuns{}, &stubRunners{}, &stubLogs{}
+	d.Auth, d.Orgs, d.Runs, d.Runners, d.Logs, d.VCS = stubAuth{}, &stubOrgs{}, &stubRuns{}, &stubRunners{}, &stubLogs{}, &stubVCS{}
 	_, rt, err := NewHandler(d)
 	if err != nil {
 		t.Fatal(err)

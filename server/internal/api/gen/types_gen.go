@@ -367,6 +367,25 @@ type FieldError struct {
 	Message string `json:"message"`
 }
 
+// GitHubInstallation defines model for GitHubInstallation.
+type GitHubInstallation struct {
+	AccountLogin   string     `json:"accountLogin"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	DisabledAt     *time.Time `json:"disabledAt,omitempty"`
+	InstallationId int64      `json:"installationId"`
+}
+
+// GitHubInstallationBind defines model for GitHubInstallationBind.
+type GitHubInstallationBind struct {
+	InstallationId int64 `json:"installationId"`
+	OrgSlug        Slug  `json:"orgSlug"`
+}
+
+// GitHubInstallationList defines model for GitHubInstallationList.
+type GitHubInstallationList struct {
+	Items []GitHubInstallation `json:"items"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -526,6 +545,23 @@ type ReadinessChecks string
 // ReadinessStatus defines model for Readiness.Status.
 type ReadinessStatus string
 
+// Repository defines model for Repository.
+type Repository struct {
+	CreatedAt      time.Time  `json:"createdAt"`
+	DefaultBranch  string     `json:"defaultBranch"`
+	DisabledAt     *time.Time `json:"disabledAt,omitempty"`
+	FullName       string     `json:"fullName"`
+	InstallationId int64      `json:"installationId"`
+	Private        bool       `json:"private"`
+	RepoId         int64      `json:"repoId"`
+}
+
+// RepositoryLink defines model for RepositoryLink.
+type RepositoryLink struct {
+	FullName       string `json:"fullName"`
+	InstallationId int64  `json:"installationId"`
+}
+
 // Role defines model for Role.
 type Role string
 
@@ -556,6 +592,11 @@ type Run struct {
 
 // RunEvent defines model for Run.Event.
 type RunEvent string
+
+// RunCreate defines model for RunCreate.
+type RunCreate struct {
+	Branch string `json:"branch"`
+}
 
 // RunDetail defines model for RunDetail.
 type RunDetail struct {
@@ -777,6 +818,11 @@ type ListRunsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// CreateRunParams defines parameters for CreateRun.
+type CreateRunParams struct {
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 // StreamJobLogParams defines parameters for StreamJobLog.
 type StreamJobLogParams struct {
 	LastEventID *int `json:"Last-Event-ID,omitempty"`
@@ -788,6 +834,19 @@ type ListRunnersParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// GithubWebhookJSONBody defines parameters for GithubWebhook.
+type GithubWebhookJSONBody = map[string]interface{}
+
+// GithubWebhookParams defines parameters for GithubWebhook.
+type GithubWebhookParams struct {
+	XGitHubEvent     string `json:"X-GitHub-Event"`
+	XGitHubDelivery  string `json:"X-GitHub-Delivery"`
+	XHubSignature256 string `json:"X-Hub-Signature-256"`
+}
+
+// BindGitHubInstallationJSONRequestBody defines body for BindGitHubInstallation for application/json ContentType.
+type BindGitHubInstallationJSONRequestBody = GitHubInstallationBind
 
 // ExchangeTokenJSONRequestBody defines body for ExchangeToken for application/json ContentType.
 type ExchangeTokenJSONRequestBody = TokenRequest
@@ -804,6 +863,12 @@ type UpdateMemberJSONRequestBody = MemberUpdate
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = ProjectCreate
 
+// LinkRepositoryJSONRequestBody defines body for LinkRepository for application/json ContentType.
+type LinkRepositoryJSONRequestBody = RepositoryLink
+
+// CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
+type CreateRunJSONRequestBody = RunCreate
+
 // CreateRunnerRegistrationTokenJSONRequestBody defines body for CreateRunnerRegistrationToken for application/json ContentType.
 type CreateRunnerRegistrationTokenJSONRequestBody = RunnerRegistrationTokenCreate
 
@@ -812,3 +877,6 @@ type LintPipelineJSONRequestBody = LintRequest
 
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = APITokenCreate
+
+// GithubWebhookJSONRequestBody defines body for GithubWebhook for application/json ContentType.
+type GithubWebhookJSONRequestBody = GithubWebhookJSONBody

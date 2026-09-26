@@ -281,7 +281,11 @@ export interface paths {
         /** A project's runs, newest first */
         get: operations["listRuns"];
         put?: never;
-        post?: never;
+        /**
+         * Start a run on a branch of the linked repository (developers)
+         * @description Retries with the same `Idempotency-Key` return the original run.
+         */
+        post: operations["createRun"];
         delete?: never;
         options?: never;
         head?: never;
@@ -409,6 +413,107 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * GitHub App webhook ingest (signature-verified, ADR-0008)
+         * @description Unauthenticated by design (invariant 9): the `X-Hub-Signature-256`
+         *     HMAC over the raw body is verified before anything is parsed, so the
+         *     body is not schema-validated here. Replays (same delivery ID or same
+         *     body) are accepted without effect. Deliveries are processed
+         *     asynchronously.
+         */
+        post: operations["githubWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/github-installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind a GitHub App installation to an org (instance admins). Audited. */
+        post: operations["bindGitHubInstallation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/github-installations/{installationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installationId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unbind an installation and remove its repository links (instance admins). Audited. */
+        delete: operations["unbindGitHubInstallation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/github-installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        /** GitHub installations bound to the org (org admins) */
+        get: operations["listGitHubInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/repository": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        /** The project's linked repository */
+        get: operations["getRepository"];
+        /** Link the project to a repository of one of the org's installations (org admins). Audited. */
+        put: operations["linkRepository"];
+        post?: never;
+        /** Remove the project's repository link (org admins). Audited. */
+        delete: operations["unlinkRepository"];
         options?: never;
         head?: never;
         patch?: never;
@@ -817,6 +922,44 @@ export interface components {
             /** @description The secret (kiln_rrt_...). Shown once; single use. */
             token: string;
             registrationToken: components["schemas"]["RunnerRegistrationToken"];
+        };
+        RunCreate: {
+            branch: string;
+        };
+        GitHubInstallation: {
+            /** Format: int64 */
+            installationId: number;
+            accountLogin: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            disabledAt?: string | null;
+        };
+        GitHubInstallationList: {
+            items: components["schemas"]["GitHubInstallation"][];
+        };
+        GitHubInstallationBind: {
+            /** Format: int64 */
+            installationId: number;
+            orgSlug: components["schemas"]["Slug"];
+        };
+        Repository: {
+            /** Format: int64 */
+            installationId: number;
+            /** Format: int64 */
+            repoId: number;
+            fullName: string;
+            defaultBranch: string;
+            private: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            disabledAt?: string | null;
+        };
+        RepositoryLink: {
+            /** Format: int64 */
+            installationId: number;
+            fullName: string;
         };
     };
     responses: {
@@ -1466,6 +1609,43 @@ export interface operations {
             500: components["responses"]["Internal"];
         };
     };
+    createRun: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCreate"];
+            };
+        };
+        responses: {
+            /** @description Created (or the run for a replayed Idempotency-Key) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
     getRun: {
         parameters: {
             query?: never;
@@ -1613,6 +1793,215 @@ export interface operations {
                 content: {
                     "text/event-stream": string;
                 };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    githubWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-GitHub-Event": string;
+                "X-GitHub-Delivery": string;
+                "X-Hub-Signature-256": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Accepted for processing */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    bindGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitHubInstallationBind"];
+            };
+        };
+        responses: {
+            /** @description Bound */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallation"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    unbindGitHubInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installationId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unbound */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    listGitHubInstallations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubInstallationList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    getRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Repository"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    linkRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepositoryLink"];
+            };
+        };
+        responses: {
+            /** @description Linked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Repository"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    unlinkRepository: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unlinked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];

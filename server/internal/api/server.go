@@ -37,6 +37,7 @@ type Deps struct {
 	Runs    RunService
 	Runners RunnerService
 	Logs    LogService
+	VCS     VCSService
 	Checks  map[string]ReadinessCheck
 	Options Options
 }
@@ -51,6 +52,7 @@ type server struct {
 	runs    RunService
 	runners RunnerService
 	logs    LogService
+	vcs     VCSService
 	streams streamLimiter
 }
 
@@ -73,6 +75,7 @@ func NewHandler(d Deps) (http.Handler, *Router, error) {
 		runs:    d.Runs,
 		runners: d.Runners,
 		logs:    d.Logs,
+		vcs:     d.VCS,
 	}
 
 	spec, err := loadSpec()
@@ -161,6 +164,17 @@ func (s *server) register(rt *Router) {
 		rt.Handle(post, runPath+"/{runId}/cancel", authz.ActionRunsCancel, s.runDetail(func(s *server) runAction { return s.runs.CancelRun }))
 		rt.Handle(post, runPath+"/{runId}/approve", authz.ActionRunsApprove, s.runDetail(func(s *server) runAction { return s.runs.ApproveRun }))
 		rt.Handle(post, "/api/v1/pipelines/lint", authz.ActionPipelinesLint, s.lintPipeline)
+	}
+	if s.vcs != nil {
+		rt.Handle(post, "/api/v1/webhooks/github", authz.PermissionPublic, s.githubWebhook)
+		rt.Handle(post, "/api/v1/admin/github-installations", authz.ActionVCSInstallationsManage, s.bindGitHubInstallation)
+		rt.Handle(del, "/api/v1/admin/github-installations/{installationId}", authz.ActionVCSInstallationsManage, s.unbindGitHubInstallation)
+		rt.Handle(get, "/api/v1/orgs/{orgSlug}/github-installations", authz.ActionVCSInstallationsList, s.listGitHubInstallations)
+		const repoPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/repository"
+		rt.Handle(get, repoPath, authz.ActionRepositoryRead, s.getRepository)
+		rt.Handle(put, repoPath, authz.ActionRepositoryManage, s.linkRepository)
+		rt.Handle(del, repoPath, authz.ActionRepositoryManage, s.unlinkRepository)
+		rt.Handle(post, "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs", authz.ActionRunsCreate, s.createRun)
 	}
 	if s.logs != nil {
 		const jobPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}"

@@ -72,14 +72,31 @@ type Progressor interface {
 	Progress(ctx context.Context, orgID, runID string) (domain.Run, error)
 }
 
+// Observer is told about run status changes made by this service, inside
+// the same transaction (internal/scheduler.RunObserver).
+type Observer interface {
+	RunChanged(ctx context.Context, run domain.Run) error
+}
+
 // Service implements the run use cases.
 type Service struct {
 	store    Store
 	az       Authorizer
 	audit    Auditor
 	progress Progressor
+	observer Observer
 	ids      *ids.Generator
 	now      func() time.Time
+}
+
+// SetObserver registers o; call it during wiring, before any use.
+func (s *Service) SetObserver(o Observer) { s.observer = o }
+
+func (s *Service) observe(ctx context.Context, r domain.Run) error {
+	if s.observer == nil {
+		return nil
+	}
+	return s.observer.RunChanged(ctx, r)
 }
 
 // NewService returns a Service. now may be nil (time.Now).
@@ -228,6 +245,11 @@ func (s *Service) CancelRun(ctx context.Context, orgSlug, projectSlug, runID str
 			}); err != nil {
 				return err //nolint:wrapcheck // store errors are contextual
 			}
+			canceled := run
+			canceled.Status, canceled.FinishedAt = domain.RunCanceled, &now
+			if err := s.observe(ctx, canceled); err != nil {
+				return err
+			}
 		} else if _, err := s.progress.Progress(ctx, proj.OrgID, runID); err != nil {
 			return err //nolint:wrapcheck // contextual
 		}
@@ -268,6 +290,11 @@ func (s *Service) ApproveRun(ctx context.Context, orgSlug, projectSlug, runID st
 			OrgID: run.OrgID, RunID: run.ID, From: run.Status, To: domain.RunQueued,
 		}); err != nil {
 			return err //nolint:wrapcheck // store errors are contextual
+		}
+		approved := run
+		approved.Status = domain.RunQueued
+		if err := s.observe(ctx, approved); err != nil {
+			return err
 		}
 		if _, err := s.progress.Progress(ctx, proj.OrgID, runID); err != nil {
 			return err //nolint:wrapcheck // contextual
@@ -436,6 +463,9 @@ func (s *Service) CreateRun(ctx context.Context, nr NewRun) (domain.Run, error) 
 			return err //nolint:wrapcheck // store errors are contextual
 		}
 		run = created
+		if err := s.observe(ctx, run); err != nil {
+			return err
+		}
 		if nr.Pipeline == nil {
 			return nil
 		}

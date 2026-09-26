@@ -29,6 +29,7 @@ const (
 
 	ActionRunsList    Action = "runs:list"
 	ActionRunsRead    Action = "runs:read"
+	ActionRunsCreate  Action = "runs:create"
 	ActionRunsCancel  Action = "runs:cancel"
 	ActionRunsApprove Action = "runs:approve"
 
@@ -38,6 +39,12 @@ const (
 
 	ActionRunnersList   Action = "runners:list"
 	ActionRunnersManage Action = "runners:manage"
+
+	ActionRepositoryRead   Action = "repository:read"
+	ActionRepositoryManage Action = "repository:manage"
+
+	ActionVCSInstallationsList   Action = "vcs-installations:list"
+	ActionVCSInstallationsManage Action = "vcs-installations:manage"
 
 	ActionTokensList   Action = "tokens:list"
 	ActionTokensCreate Action = "tokens:create"
@@ -84,6 +91,7 @@ var policy = map[Action]rule{
 
 	ActionRunsList:   {minRole: domain.RoleViewer},
 	ActionRunsRead:   {minRole: domain.RoleViewer},
+	ActionRunsCreate: {minRole: domain.RoleDeveloper},
 	ActionRunsCancel: {minRole: domain.RoleDeveloper},
 	// Approving runs untrusted (fork) code on the org's runners (ADR-0008 §5).
 	ActionRunsApprove: {minRole: domain.RoleDeveloper},
@@ -96,6 +104,14 @@ var policy = map[Action]rule{
 
 	ActionRunnersList:   {minRole: domain.RoleAdmin},
 	ActionRunnersManage: {minRole: domain.RoleAdmin},
+
+	ActionRepositoryRead:   {minRole: domain.RoleViewer},
+	ActionRepositoryManage: {minRole: domain.RoleAdmin},
+
+	ActionVCSInstallationsList: {minRole: domain.RoleAdmin},
+	// Binding a GitHub installation to an org decides which tenant may use
+	// its repositories (ADR-0008 §2): instance admins only.
+	ActionVCSInstallationsManage: {instanceAdmin: true},
 
 	ActionTokensList:   {selfOnly: true},
 	ActionTokensCreate: {selfOnly: true},

@@ -197,3 +197,10 @@ func (s *Store) ListProjects(ctx context.Context, orgID, afterID string, limit i
 	}
 	return out, nil
 }
+
+// GetOrgBySlug returns an org without checking membership. Only
+// instance-admin operations may use it.
+func (s *Store) GetOrgBySlug(ctx context.Context, slug string) (domain.Org, error) {
+	r, err := s.q(ctx).GetOrgBySlug(ctx, slug)
+	return domain.Org{ID: r.ID, Slug: r.Slug, Name: r.Name, CreatedAt: r.CreatedAt}, mapErr("get org by slug", err)
+}

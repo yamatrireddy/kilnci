@@ -22,6 +22,7 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/api"
 	"github.com/yamatrireddy/kilnci/server/internal/auth"
 	"github.com/yamatrireddy/kilnci/server/internal/auth/authz"
+	"github.com/yamatrireddy/kilnci/server/internal/domain"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/bus"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/config"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/httpclient"
@@ -38,7 +39,9 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
+	"github.com/yamatrireddy/kilnci/server/internal/service/vcs"
 	"github.com/yamatrireddy/kilnci/server/internal/store"
+	"github.com/yamatrireddy/kilnci/server/internal/vcs/github"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -163,6 +166,25 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 	}
 	logSvc := logs.NewService(st, authorizer, logStore, notifier, logs.Options{MaxLogBytes: cfg.Logs.MaxBytes}, nil)
 
+	var ghClient vcs.GitHub
+	var webhookSecret []byte
+	if cfg.GitHub.Enabled() {
+		c, err := github.New(github.Options{
+			AppID: cfg.GitHub.AppID, PrivateKey: []byte(cfg.GitHub.PrivateKey.Reveal()), APIURL: cfg.GitHub.APIURL, HTTP: egress,
+		})
+		if err != nil {
+			return err //nolint:wrapcheck // contextual, key-free
+		}
+		ghClient, webhookSecret = c, []byte(cfg.GitHub.WebhookSecret.Reveal())
+	} else {
+		log.WarnContext(ctx, "GitHub integration disabled: set KILN_GITHUB_APP_ID, KILN_GITHUB_APP_PRIVATE_KEY_FILE and KILN_GITHUB_WEBHOOK_SECRET")
+	}
+	vcsSvc := vcs.NewService(st, authorizer, recorder, ghClient, runSvc, gen,
+		vcs.Options{WebhookSecret: webhookSecret, PublicOrigin: cfg.PublicOrigin(), Log: log}, nil)
+	// Commit statuses are queued in the same transaction as run changes.
+	sched.Progressor().SetObserver(vcsSvc)
+	runSvc.SetObserver(vcsSvc)
+
 	var webFS fs.FS
 	if cfg.Web.Dir != "" {
 		webFS = os.DirFS(cfg.Web.Dir)
@@ -176,6 +198,7 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		Runs:    runSvc,
 		Runners: runnerSvc,
 		Logs:    logSvc,
+		VCS:     vcsSvc,
 		Checks:  checks,
 		Options: api.Options{
 			MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,
@@ -210,8 +233,12 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		sched.RunReaper(gctx)
 		return nil
 	})
+	g.Go(func() error {
+		vcsSvc.RunWorker(gctx)
+		return nil
+	})
 	if ca != nil {
-		rpcSrv, err := rpc.New(log, rpc.Services{Runners: runnerSvc, Scheduler: sched, Logs: logSvc}, rpc.Options{CA: ca, Hostnames: cfg.Runner.Hostnames})
+		rpcSrv, err := rpc.New(log, rpc.Services{Runners: runnerSvc, Scheduler: sched, Logs: logSvc, Checkout: checkoutAdapter{vcsSvc}}, rpc.Options{CA: ca, Hostnames: cfg.Runner.Hostnames})
 		if err != nil {
 			return fmt.Errorf("build runner server: %w", err)
 		}
@@ -228,6 +255,15 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 	}
 	log.InfoContext(ctx, "kiln-server stopped")
 	return nil
+}
+
+// checkoutAdapter exposes the VCS service's checkout to the runner
+// transport without the service importing the transport.
+type checkoutAdapter struct{ svc *vcs.Service }
+
+func (a checkoutAdapter) Checkout(ctx context.Context, run domain.Run) (rpc.Checkout, error) {
+	co, err := a.svc.Checkout(ctx, run)
+	return rpc.Checkout{RepositoryURL: co.RepositoryURL, AuthorizationHeader: co.AuthorizationHeader}, err //nolint:wrapcheck // contextual
 }
 
 // openLogStore opens the configured job log store (ADR-0007 §2).

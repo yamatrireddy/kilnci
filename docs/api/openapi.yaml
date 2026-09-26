@@ -32,6 +32,7 @@ tags:
   - name: runs
   - name: pipelines
   - name: runners
+  - name: vcs
 
 paths:
   /healthz:
@@ -471,6 +472,36 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/Internal" }
 
+    post:
+      tags: [runs]
+      operationId: createRun
+      summary: Start a run on a branch of the linked repository (developers)
+      description: Retries with the same `Idempotency-Key` return the original run.
+      x-kiln-permission: runs:create
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 255, pattern: "^[A-Za-z0-9._:-]+$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunCreate" }
+      responses:
+        "201":
+          description: Created (or the run for a replayed Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
   /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}:
     parameters:
       - $ref: "#/components/parameters/OrgSlug"
@@ -608,6 +639,163 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/webhooks/github:
+    post:
+      tags: [vcs]
+      operationId: githubWebhook
+      summary: GitHub App webhook ingest (signature-verified, ADR-0008)
+      description: |
+        Unauthenticated by design (invariant 9): the `X-Hub-Signature-256`
+        HMAC over the raw body is verified before anything is parsed, so the
+        body is not schema-validated here. Replays (same delivery ID or same
+        body) are accepted without effect. Deliveries are processed
+        asynchronously.
+      x-kiln-permission: public
+      security: []
+      parameters:
+        - { name: X-GitHub-Event, in: header, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: X-GitHub-Delivery, in: header, required: true, schema: { type: string, maxLength: 100 } }
+        - { name: X-Hub-Signature-256, in: header, required: true, schema: { type: string, maxLength: 100 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "202": { description: Accepted for processing }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/admin/github-installations:
+    post:
+      tags: [vcs]
+      operationId: bindGitHubInstallation
+      summary: Bind a GitHub App installation to an org (instance admins). Audited.
+      x-kiln-permission: vcs-installations:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitHubInstallationBind" }
+      responses:
+        "201":
+          description: Bound
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitHubInstallation" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/admin/github-installations/{installationId}:
+    parameters:
+      - name: installationId
+        in: path
+        required: true
+        schema: { type: integer, format: int64, minimum: 1 }
+    delete:
+      tags: [vcs]
+      operationId: unbindGitHubInstallation
+      summary: Unbind an installation and remove its repository links (instance admins). Audited.
+      x-kiln-permission: vcs-installations:manage
+      responses:
+        "204": { description: Unbound }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/github-installations:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [vcs]
+      operationId: listGitHubInstallations
+      summary: GitHub installations bound to the org (org admins)
+      x-kiln-permission: vcs-installations:list
+      responses:
+        "200":
+          description: Installations
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitHubInstallationList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/repository:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+    get:
+      tags: [vcs]
+      operationId: getRepository
+      summary: The project's linked repository
+      x-kiln-permission: repository:read
+      responses:
+        "200":
+          description: The link
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repository" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    put:
+      tags: [vcs]
+      operationId: linkRepository
+      summary: Link the project to a repository of one of the org's installations (org admins). Audited.
+      x-kiln-permission: repository:manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RepositoryLink" }
+      responses:
+        "200":
+          description: Linked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Repository" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+    delete:
+      tags: [vcs]
+      operationId: unlinkRepository
+      summary: Remove the project's repository link (org admins). Audited.
+      x-kiln-permission: repository:manage
+      responses:
+        "204": { description: Unlinked }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1306,3 +1494,53 @@ components:
           type: string
           description: The secret (kiln_rrt_...). Shown once; single use.
         registrationToken: { $ref: "#/components/schemas/RunnerRegistrationToken" }
+
+    RunCreate:
+      type: object
+      additionalProperties: false
+      required: [branch]
+      properties:
+        branch: { type: string, minLength: 1, maxLength: 200 }
+    GitHubInstallation:
+      type: object
+      additionalProperties: false
+      required: [installationId, accountLogin, createdAt]
+      properties:
+        installationId: { type: integer, format: int64 }
+        accountLogin: { type: string }
+        createdAt: { type: string, format: date-time }
+        disabledAt: { type: string, format: date-time, nullable: true }
+    GitHubInstallationList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/GitHubInstallation" }
+    GitHubInstallationBind:
+      type: object
+      additionalProperties: false
+      required: [installationId, orgSlug]
+      properties:
+        installationId: { type: integer, format: int64, minimum: 1 }
+        orgSlug: { $ref: "#/components/schemas/Slug" }
+    Repository:
+      type: object
+      additionalProperties: false
+      required: [installationId, repoId, fullName, defaultBranch, private, createdAt]
+      properties:
+        installationId: { type: integer, format: int64 }
+        repoId: { type: integer, format: int64 }
+        fullName: { type: string }
+        defaultBranch: { type: string }
+        private: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        disabledAt: { type: string, format: date-time, nullable: true }
+    RepositoryLink:
+      type: object
+      additionalProperties: false
+      required: [installationId, fullName]
+      properties:
+        installationId: { type: integer, format: int64, minimum: 1 }
+        fullName: { type: string, minLength: 3, maxLength: 140, pattern: "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$" }
