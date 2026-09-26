@@ -27,8 +27,10 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/platform/ids"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/logging"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/telemetry"
+	"github.com/yamatrireddy/kilnci/server/internal/scheduler"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
+	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
 	"github.com/yamatrireddy/kilnci/server/internal/store"
 )
 
@@ -119,6 +121,8 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		RequiredAMR:            cfg.OIDC.RequiredAMR,
 	})
 	orgSvc := orgs.NewService(st, authorizer, recorder, gen, nil)
+	sched := scheduler.New(st, log, scheduler.Options{}, nil)
+	runSvc := runs.NewService(st, authorizer, recorder, sched.Progressor(), gen, nil)
 
 	var webFS fs.FS
 	if cfg.Web.Dir != "" {
@@ -130,6 +134,7 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		Authn:  authSvc,
 		Auth:   authSvc,
 		Orgs:   orgSvc,
+		Runs:   runSvc,
 		Checks: map[string]api.ReadinessCheck{"database": st.Ping},
 		Options: api.Options{
 			MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,
@@ -158,6 +163,10 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		authSvc.RunJanitor(gctx, 10*time.Minute)
+		return nil
+	})
+	g.Go(func() error {
+		sched.RunReaper(gctx)
 		return nil
 	})
 	g.Go(func() error { return httpserver.Serve(gctx, log, srvOpts, handler, nil) })
