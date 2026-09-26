@@ -76,6 +76,33 @@ type DesktopRefreshToken struct {
 	UsedAt    *time.Time
 }
 
+type Job struct {
+	ID              string
+	OrgID           string
+	RunID           string
+	Name            string
+	Status          string
+	Needs           []string
+	Image           string
+	Labels          []string
+	Steps           []byte
+	Env             []byte
+	TimeoutSeconds  int32
+	Attempt         int32
+	MaxAttempts     int32
+	Trusted         bool
+	RunnerID        *string
+	LeaseID         []byte
+	LeaseExpiresAt  *time.Time
+	CancelRequested bool
+	ExitCode        *int32
+	FailureReason   string
+	CreatedAt       time.Time
+	QueuedAt        *time.Time
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+}
+
 type LoginState struct {
 	StateHash            []byte
 	Client               string
@@ -109,6 +136,35 @@ type Project struct {
 	Slug      string
 	Name      string
 	CreatedAt time.Time
+}
+
+type ProjectRunCounter struct {
+	ProjectID  string
+	OrgID      string
+	LastNumber int64
+}
+
+type Run struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	Number         int64
+	Status         string
+	Event          string
+	Ref            string
+	Branch         string
+	CommitSha      string
+	Title          string
+	PrNumber       int32
+	IsFork         bool
+	Trusted        bool
+	ActorLogin     string
+	CreatedBy      *string
+	IdempotencyKey *string
+	Error          string
+	CreatedAt      time.Time
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
 }
 
 type User struct {

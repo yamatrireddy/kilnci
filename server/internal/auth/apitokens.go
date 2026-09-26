@@ -24,6 +24,9 @@ var tokenScopes = []authz.Action{
 	authz.ActionProjectsList,
 	authz.ActionProjectsRead,
 	authz.ActionAuditRead,
+	authz.ActionRunsList,
+	authz.ActionRunsRead,
+	authz.ActionPipelinesLint, // side-effect free; backs `kiln lint`
 }
 
 func isTokenScope(a authz.Action) bool { return slices.Contains(tokenScopes, a) }

@@ -268,6 +268,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        /** A project's runs, newest first */
+        get: operations["listRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        /** A run and its jobs */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a run (developers)
+         * @description Pending and queued jobs are canceled at once; running jobs are asked to
+         *     stop at their runner's next heartbeat, so the run may stay `running`
+         *     briefly. Canceling a finished run is a 409. Audited.
+         */
+        post: operations["cancelRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve an untrusted (fork) run so its jobs may start (developers)
+         * @description Only runs in `awaiting_approval` can be approved; anything else is a 409. Audited.
+         */
+        post: operations["approveRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipelines/lint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a pipeline definition without running it
+         * @description Uses the same safe loader as run creation (docs/specs/pipeline.md). Reads no tenant data.
+         */
+        post: operations["lintPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tokens": {
         parameters: {
             query?: never;
@@ -319,10 +430,10 @@ export interface components {
         /** @enum {string} */
         Role: "viewer" | "developer" | "admin" | "owner";
         /**
-         * @description Actions an API token may be scoped to (read-only in Phase 0).
+         * @description Actions an API token may be scoped to (read-only).
          * @enum {string}
          */
-        Permission: "session:read" | "orgs:list" | "orgs:read" | "members:list" | "projects:list" | "projects:read" | "audit:read";
+        Permission: "session:read" | "orgs:list" | "orgs:read" | "members:list" | "projects:list" | "projects:read" | "audit:read" | "runs:list" | "runs:read" | "pipelines:lint";
         Health: {
             /** @enum {string} */
             status: "ok";
@@ -473,6 +584,82 @@ export interface components {
         APITokenList: {
             items: components["schemas"]["APIToken"][];
         };
+        /** @enum {string} */
+        RunStatus: "awaiting_approval" | "queued" | "running" | "succeeded" | "failed" | "canceled";
+        /** @enum {string} */
+        JobStatus: "pending" | "queued" | "running" | "succeeded" | "failed" | "canceled" | "skipped";
+        /**
+         * @description `title`, `branch`, and `actorLogin` come from the VCS event and are
+         *     untrusted text (fork PR authors control them); render as text only.
+         */
+        Run: {
+            id: components["schemas"]["ID"];
+            /** Format: int64 */
+            number: number;
+            status: components["schemas"]["RunStatus"];
+            /** @enum {string} */
+            event: "push" | "pull_request" | "manual";
+            ref: string;
+            branch: string;
+            commitSha: string;
+            title: string;
+            prNumber?: number | null;
+            isFork: boolean;
+            trusted: boolean;
+            actorLogin: string;
+            /** @description Why the run failed before any job ran (e.g. an invalid pipeline). */
+            error?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+        };
+        RunList: {
+            items: components["schemas"]["Run"][];
+            nextCursor?: string | null;
+        };
+        JobStep: {
+            name: string;
+        };
+        Job: {
+            id: components["schemas"]["ID"];
+            name: string;
+            status: components["schemas"]["JobStatus"];
+            needs: string[];
+            image: string;
+            labels: string[];
+            steps: components["schemas"]["JobStep"][];
+            attempt: number;
+            maxAttempts: number;
+            timeoutSeconds: number;
+            exitCode?: number | null;
+            failureReason: string;
+            /** Format: date-time */
+            queuedAt?: string | null;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+        };
+        RunDetail: {
+            run: components["schemas"]["Run"];
+            jobs: components["schemas"]["Job"][];
+        };
+        LintRequest: {
+            /** @description The contents of .kiln/pipeline.yaml. */
+            pipeline: string;
+        };
+        LintProblem: {
+            path: string;
+            line: number;
+            message: string;
+        };
+        LintResult: {
+            valid: boolean;
+            problems: components["schemas"]["LintProblem"][];
+        };
     };
     responses: {
         /** @description Redirect */
@@ -560,6 +747,7 @@ export interface components {
     parameters: {
         OrgSlug: components["schemas"]["Slug"];
         ProjectSlug: components["schemas"]["Slug"];
+        RunID: components["schemas"]["ID"];
         UserID: components["schemas"]["ID"];
         /** @description Opaque cursor from a previous page's `nextCursor`. */
         Cursor: string;
@@ -1082,6 +1270,161 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    listRuns: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    cancelRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run after the cancel request */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    approveRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                runId: components["parameters"]["RunID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The approved run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+        };
+    };
+    lintPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LintRequest"];
+            };
+        };
+        responses: {
+            /** @description Lint result (an invalid pipeline is still a 200) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LintResult"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["Validation"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["Internal"];

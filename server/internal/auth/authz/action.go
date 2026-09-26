@@ -27,6 +27,13 @@ const (
 
 	ActionAuditRead Action = "audit:read"
 
+	ActionRunsList    Action = "runs:list"
+	ActionRunsRead    Action = "runs:read"
+	ActionRunsCancel  Action = "runs:cancel"
+	ActionRunsApprove Action = "runs:approve"
+
+	ActionPipelinesLint Action = "pipelines:lint"
+
 	ActionTokensList   Action = "tokens:list"
 	ActionTokensCreate Action = "tokens:create"
 	ActionTokensDelete Action = "tokens:delete"
@@ -69,6 +76,14 @@ var policy = map[Action]rule{
 	ActionProjectsRead:   {minRole: domain.RoleViewer},
 
 	ActionAuditRead: {minRole: domain.RoleAdmin},
+
+	ActionRunsList:   {minRole: domain.RoleViewer},
+	ActionRunsRead:   {minRole: domain.RoleViewer},
+	ActionRunsCancel: {minRole: domain.RoleDeveloper},
+	// Approving runs untrusted (fork) code on the org's runners (ADR-0008 §5).
+	ActionRunsApprove: {minRole: domain.RoleDeveloper},
+
+	ActionPipelinesLint: {selfOnly: true}, // reads no tenant data
 
 	ActionTokensList:   {selfOnly: true},
 	ActionTokensCreate: {selfOnly: true},

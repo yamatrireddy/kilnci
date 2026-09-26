@@ -34,6 +34,7 @@ type Deps struct {
 	Authn   Authenticator
 	Auth    AuthService
 	Orgs    OrgService
+	Runs    RunService
 	Checks  map[string]ReadinessCheck
 	Options Options
 }
@@ -45,6 +46,7 @@ type server struct {
 	ips    clientIPResolver
 	auth   AuthService
 	orgs   OrgService
+	runs   RunService
 }
 
 // NewHandler builds the complete, validated HTTP handler. It returns an error
@@ -63,6 +65,7 @@ func NewHandler(d Deps) (http.Handler, *Router, error) {
 		ips:    clientIPResolver{trusted: d.Options.TrustedProxies},
 		auth:   d.Auth,
 		orgs:   d.Orgs,
+		runs:   d.Runs,
 	}
 
 	spec, err := loadSpec()
@@ -143,5 +146,13 @@ func (s *server) register(rt *Router) {
 		rt.Handle(post, "/api/v1/orgs/{orgSlug}/projects", authz.ActionProjectsCreate, s.createProject)
 		rt.Handle(get, "/api/v1/orgs/{orgSlug}/projects/{projectSlug}", authz.ActionProjectsRead, s.getProject)
 		rt.Handle(get, "/api/v1/orgs/{orgSlug}/audit-events", authz.ActionAuditRead, s.listAuditEvents)
+	}
+	if s.runs != nil {
+		const runPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs"
+		rt.Handle(get, runPath, authz.ActionRunsList, s.listRuns)
+		rt.Handle(get, runPath+"/{runId}", authz.ActionRunsRead, s.runDetail(func(s *server) runAction { return s.runs.GetRun }))
+		rt.Handle(post, runPath+"/{runId}/cancel", authz.ActionRunsCancel, s.runDetail(func(s *server) runAction { return s.runs.CancelRun }))
+		rt.Handle(post, runPath+"/{runId}/approve", authz.ActionRunsApprove, s.runDetail(func(s *server) runAction { return s.runs.ApproveRun }))
+		rt.Handle(post, "/api/v1/pipelines/lint", authz.ActionPipelinesLint, s.lintPipeline)
 	}
 }

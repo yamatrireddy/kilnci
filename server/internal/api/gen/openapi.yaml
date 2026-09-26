@@ -29,6 +29,8 @@ tags:
   - name: projects
   - name: tokens
   - name: audit
+  - name: runs
+  - name: pipelines
 
 paths:
   /healthz:
@@ -443,6 +445,132 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/Internal" }
 
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+    get:
+      tags: [runs]
+      operationId: listRuns
+      summary: A project's runs, newest first
+      x-kiln-permission: runs:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of runs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: A run and its jobs
+      x-kiln-permission: runs:read
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+    post:
+      tags: [runs]
+      operationId: cancelRun
+      summary: Cancel a run (developers)
+      description: |
+        Pending and queued jobs are canceled at once; running jobs are asked to
+        stop at their runner's next heartbeat, so the run may stay `running`
+        briefly. Canceling a finished run is a 409. Audited.
+      x-kiln-permission: runs:cancel
+      responses:
+        "200":
+          description: The run after the cancel request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/RunID"
+    post:
+      tags: [runs]
+      operationId: approveRun
+      summary: Approve an untrusted (fork) run so its jobs may start (developers)
+      description: Only runs in `awaiting_approval` can be approved; anything else is a 409. Audited.
+      x-kiln-permission: runs:approve
+      responses:
+        "200":
+          description: The approved run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
+  /api/v1/pipelines/lint:
+    post:
+      tags: [pipelines]
+      operationId: lintPipeline
+      summary: Validate a pipeline definition without running it
+      description: Uses the same safe loader as run creation (docs/specs/pipeline.md). Reads no tenant data.
+      x-kiln-permission: pipelines:lint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LintRequest" }
+      responses:
+        "200":
+          description: Lint result (an invalid pipeline is still a 200)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LintResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+
   /api/v1/tokens:
     get:
       tags: [tokens]
@@ -530,6 +658,11 @@ components:
       in: path
       required: true
       schema: { $ref: "#/components/schemas/Slug" }
+    RunID:
+      name: runId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ID" }
     UserID:
       name: userId
       in: path
@@ -624,7 +757,10 @@ components:
         - projects:list
         - projects:read
         - audit:read
-      description: Actions an API token may be scoped to (read-only in Phase 0).
+        - runs:list
+        - runs:read
+        - pipelines:lint
+      description: Actions an API token may be scoped to (read-only).
 
     Health:
       type: object
@@ -859,3 +995,106 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/APIToken" }
+
+    RunStatus:
+      type: string
+      enum: [awaiting_approval, queued, running, succeeded, failed, canceled]
+    JobStatus:
+      type: string
+      enum: [pending, queued, running, succeeded, failed, canceled, skipped]
+    Run:
+      type: object
+      additionalProperties: false
+      description: |
+        `title`, `branch`, and `actorLogin` come from the VCS event and are
+        untrusted text (fork PR authors control them); render as text only.
+      required: [id, number, status, event, ref, branch, commitSha, title, isFork, trusted, actorLogin, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        number: { type: integer, format: int64 }
+        status: { $ref: "#/components/schemas/RunStatus" }
+        event: { type: string, enum: [push, pull_request, manual] }
+        ref: { type: string }
+        branch: { type: string }
+        commitSha: { type: string }
+        title: { type: string }
+        prNumber: { type: integer, nullable: true }
+        isFork: { type: boolean }
+        trusted: { type: boolean }
+        actorLogin: { type: string }
+        error: { type: string, description: "Why the run failed before any job ran (e.g. an invalid pipeline)." }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }
+    RunList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Run" }
+        nextCursor: { type: string, nullable: true }
+    JobStep:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string }
+    Job:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, needs, image, labels, steps, attempt, maxAttempts, timeoutSeconds, failureReason]
+      properties:
+        id: { $ref: "#/components/schemas/ID" }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        needs: { type: array, items: { type: string } }
+        image: { type: string }
+        labels: { type: array, items: { type: string } }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/JobStep" }
+        attempt: { type: integer }
+        maxAttempts: { type: integer }
+        timeoutSeconds: { type: integer }
+        exitCode: { type: integer, nullable: true }
+        failureReason: { type: string }
+        queuedAt: { type: string, format: date-time, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }
+    RunDetail:
+      type: object
+      additionalProperties: false
+      required: [run, jobs]
+      properties:
+        run: { $ref: "#/components/schemas/Run" }
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/Job" }
+    LintRequest:
+      type: object
+      additionalProperties: false
+      required: [pipeline]
+      properties:
+        pipeline:
+          type: string
+          maxLength: 262144
+          description: The contents of .kiln/pipeline.yaml.
+    LintProblem:
+      type: object
+      additionalProperties: false
+      required: [path, line, message]
+      properties:
+        path: { type: string }
+        line: { type: integer }
+        message: { type: string }
+    LintResult:
+      type: object
+      additionalProperties: false
+      required: [valid, problems]
+      properties:
+        valid: { type: boolean }
+        problems:
+          type: array
+          items: { $ref: "#/components/schemas/LintProblem" }

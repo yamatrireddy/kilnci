@@ -83,6 +83,10 @@ type Run struct {
 	Trusted bool
 	// ActorLogin is the VCS login (or Kiln user ID for manual runs) that caused the run.
 	ActorLogin string
+	// CreatedBy is the Kiln user who started a manual run ("" otherwise).
+	CreatedBy string
+	// IdempotencyKey deduplicates manual run creation ("" if none was sent).
+	IdempotencyKey string
 	// Error is a safe, author-facing reason when the run failed before any job ran.
 	Error      string
 	CreatedAt  time.Time

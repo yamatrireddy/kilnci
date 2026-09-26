@@ -8,7 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
+
+	"github.com/yamatrireddy/kilnci/server/internal/domain"
+	"github.com/yamatrireddy/kilnci/server/internal/engine/spec"
+	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
 
 	"github.com/yamatrireddy/kilnci/server/internal/store/storetest"
 )
@@ -16,10 +21,13 @@ import (
 // fixture is a populated org with one member per role, a foreign-org user,
 // and a read-only API token belonging to the owner.
 type fixture struct {
-	env     *env
-	org     string // slug of org A
-	project string
-	actors  map[string]*client
+	env       *env
+	org       string // slug of org A
+	project   string
+	orgID     string
+	projectID string
+	runID     string
+	actors    map[string]*client
 }
 
 const (
@@ -52,12 +60,37 @@ func newFixture(t *testing.T) *fixture {
 	f.actors[outsider] = invite(orgB, "owner")
 
 	rec := e.do(root, http.MethodPost, "/api/v1/tokens",
-		`{"name":"ci","scopes":["session:read","orgs:list","orgs:read","members:list","projects:list","projects:read","audit:read"],"expiresInDays":30}`)
+		`{"name":"ci","scopes":["session:read","orgs:list","orgs:read","members:list","projects:list","projects:read","audit:read","runs:list","runs:read","pipelines:lint"],"expiresInDays":30}`)
 	e.mustStatus(rec, http.StatusCreated)
 	f.actors[token] = &client{bearer: decode[struct {
 		Token string `json:"token"`
 	}](t, rec).Token}
+
+	type withID struct {
+		ID string `json:"id"`
+	}
+	f.orgID = decode[withID](t, e.do(root, http.MethodGet, "/api/v1/orgs/"+orgA, "")).ID
+	f.projectID = decode[withID](t, e.do(root, http.MethodGet, "/api/v1/orgs/"+orgA+"/projects/"+proj, "")).ID
 	return f
+}
+
+// newRun creates a run in org A's project through the service (runs are
+// normally created by webhook triggers). Fork runs await approval.
+func (f *fixture) newRun(fork bool) string {
+	f.env.t.Helper()
+	pl, err := spec.Parse([]byte(testPipeline))
+	if err != nil {
+		f.env.t.Fatal(err)
+	}
+	run, err := f.env.runs.CreateRun(f.env.t.Context(), runs.NewRun{
+		OrgID: f.orgID, ProjectID: f.projectID, Event: domain.EventPullRequest, Ref: "refs/pull/7/head",
+		Branch: "feature", CommitSHA: strings.Repeat("ab", 20), Title: "Add feature", PRNumber: 7,
+		IsFork: fork, ActorLogin: "octocat", Pipeline: pl,
+	})
+	if err != nil {
+		f.env.t.Fatal(err)
+	}
+	return run.ID
 }
 
 // target creates a fresh developer in org A and returns their user ID, so
@@ -105,6 +138,7 @@ func static(path, body string) func(*fixture) (string, string) {
 // Required by security-standards §4 and threat-model scenario S2.
 func TestAuthzMatrix(t *testing.T) {
 	f := newFixture(t)
+	f.runID = f.newRun(false)
 	org := func(suffix string) string { return "/api/v1/orgs/" + f.org + suffix }
 
 	cases := []matrixCase{
@@ -138,6 +172,20 @@ func TestAuthzMatrix(t *testing.T) {
 		{"GET", "/api/v1/tokens", static("/api/v1/tokens", ""), statuses(200, 200, 200, 200, 200, 401, 403)},
 		{"POST", "/api/v1/tokens", static("/api/v1/tokens", `{"name":"x","scopes":["orgs:list"],"expiresInDays":7}`),
 			statuses(201, 201, 201, 201, 201, 401, 403)},
+		{"GET", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/runs"), ""
+		}, statuses(200, 200, 200, 200, 404, 401, 200)},
+		{"GET", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/runs/" + f.runID), ""
+		}, statuses(200, 200, 200, 200, 404, 401, 200)},
+		{"POST", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/cancel", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/runs/" + f.newRun(false) + "/cancel"), ""
+		}, statuses(200, 200, 200, 403, 404, 401, 403)},
+		{"POST", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/approve", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/runs/" + f.newRun(true) + "/approve"), ""
+		}, statuses(200, 200, 200, 403, 404, 401, 403)},
+		{"POST", "/api/v1/pipelines/lint", static("/api/v1/pipelines/lint", `{"pipeline":"version: 1"}`),
+			statuses(200, 200, 200, 200, 200, 401, 200)},
 		// Everyone but the owner targets someone else's token: not found.
 		{"DELETE", "/api/v1/tokens/{tokenId}", func(f *fixture) (string, string) { return "/api/v1/tokens/" + f.ownerToken(), "" },
 			statuses(204, 404, 404, 404, 404, 401, 403)},
@@ -189,3 +237,15 @@ func TestAuthzMatrix(t *testing.T) {
 		t.Fatalf("audit chain: %v", err)
 	}
 }
+
+// testPipeline has two jobs, the second needing the first.
+const testPipeline = `version: 1
+jobs:
+  a:
+    image: alpine
+    steps: [{run: x}]
+  b:
+    image: alpine
+    needs: [a]
+    steps: [{run: y}]
+`
