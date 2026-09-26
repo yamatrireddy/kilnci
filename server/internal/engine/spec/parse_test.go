@@ -136,6 +136,7 @@ func TestParse_Limits(t *testing.T) {
 		"run too long":          {"version: 1\njobs:\n  a:\n    image: alpine\n    steps: [{run: " + strings.Repeat("x", MaxRunBytes+1) + "}]", "at most 64 KiB"},
 		"step timeout over job": {"version: 1\njobs:\n  a:\n    image: alpine\n    timeout: 5m\n    steps: [{run: x, timeout: 10m}]", "between 1s and 5m0s"},
 		"control char in name":  {"version: 1\njobs:\n  a:\n    image: alpine\n    steps: [{name: \"a\\u001b[31m\", run: x}]", "control characters"},
+		"bidi override in name": {"version: 1\njobs:\n  a:\n    image: alpine\n    steps: [{name: \"safe\\u202eexe.txt\", run: x}]", "control characters"},
 		"null value":            {"version: 1\njobs:\n  a:\n    image:\n    steps: [{run: x}]", "must be a string"},
 	}
 	for name, c := range cases {
