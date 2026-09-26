@@ -153,6 +153,11 @@ linters:
       - path: internal/platform/config/
         linters: [forbidigo]
         text: os\.(Getenv|LookupEnv|Environ)
+      # The CLI's config package is its one place allowed to read the
+      # environment (KILN_SERVER, KILN_TOKEN), mirroring platform/config.
+      - path: ^cli/internal/config/
+        linters: [forbidigo]
+        text: os\.(Getenv|LookupEnv|Environ)
       # The httpclient package is where the default transport is wrapped.
       - path: internal/platform/httpclient/
         linters: [forbidigo]

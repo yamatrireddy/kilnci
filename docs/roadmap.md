@@ -50,7 +50,7 @@ Each item crossing a trust boundary (B1, B2, B3, B6) gets an ADR first.
 | 8. GitHub | GitHub App, signature-verified webhook ingest and queue, push/PR triggers, fork detection, manual runs, commit-status outbox | done |
 | 9. Security review | Runner and log-pipeline review findings closed (see the PR that closed them and `docs/threat-model.md`) | done |
 | 10. Runs UI | Runs and jobs pages, sanitizing ANSI log viewer (T-09) | not started |
-| 11. `kiln lint` CLI | `cli/` wrapper over the lint API | not started |
+| 11. `kiln lint` CLI | `cli/` wrapper over the lint API ([docs/cli.md](cli.md)) | done |
 
 **Exit criteria:** a push to a linked GitHub repository creates a run, jobs execute
 on a registered runner in the hardened Docker sandbox, masked logs stream live to
