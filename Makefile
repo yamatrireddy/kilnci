@@ -163,9 +163,12 @@ sec-govulncheck:
 	cd server && $(call tool,govulncheck) ./...
 	cd runner && $(call tool,govulncheck) ./...
 
+# GOWORK=off: tools/ is deliberately outside go.work, and with the workspace
+# active the scanner cannot load tools/go.mod's packages. Per-directory
+# ignores (each with a reason and an expiry) live in osv-scanner.toml files.
 .PHONY: sec-osv
 sec-osv:
-	$(call tool,osv-scanner) scan source --recursive --lockfile=pnpm-lock.yaml --lockfile=server/go.mod .
+	GOWORK=off $(call tool,osv-scanner) scan source --recursive --lockfile=pnpm-lock.yaml --lockfile=server/go.mod .
 
 .PHONY: sec-pnpm-audit
 sec-pnpm-audit:
