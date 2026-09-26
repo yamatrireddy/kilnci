@@ -8,6 +8,10 @@ Definition of Done in `CLAUDE.md` passes. Threat-model entries move from **P** t
 Mobile (Expo) is deferred until after Phase 2; the API it needs is the same one web
 and desktop use.
 
+**Current status (2026-09-26):** Phase 1 is active. All twelve Phase 1 slices are
+merged; the phase closes once its exit criteria are verified end to end (see
+[Closing Phase 1](#closing-phase-1)). Phases 2 to 5 have not started.
+
 ---
 
 ## Phase 0 — Foundations (implemented; pending maintainer review)
@@ -29,7 +33,7 @@ feature has to invent its own auth, error model, config, or UI conventions.
 and projects, cross-org access returns 404 in the authz matrix, and `make generate
 lint test security` is green.
 
-## Phase 1 — CI core (in progress)
+## Phase 1 — CI core (slices done; exit criteria not yet verified)
 
 Pipeline spec + safe YAML loader (fuzzed), DAG planning, scheduler with leases,
 runner protocol (`proto/`, mTLS, pull-only), Docker executor (hardened defaults),
@@ -56,6 +60,19 @@ Each item crossing a trust boundary (B1, B2, B3, B6) gets an ADR first.
 on a registered runner in the hardened Docker sandbox, masked logs stream live to
 the runs UI, the commit status reflects the result, and `make generate lint test
 test-integration security` is green.
+
+### Closing Phase 1
+
+The end-to-end scenario above has not been run yet. Locally the runs list
+stays empty because a run needs a linked GitHub repository and GitHub App, and
+runners and repository linking have no UI yet (API only). To close the phase:
+
+- Run the exit scenario against a real GitHub App installation: push, run, jobs on a
+  registered runner, masked live logs in the runs UI, commit status.
+- Replace the `make e2e` stub with the compose-based suite (webhook → run → logs);
+  it is still a Phase 0 follow-up below.
+- Close or explicitly defer each item under [Phase 1 follow-ups](#phase-1-follow-ups).
+- Update "Current status" in `CLAUDE.md` and the README when the phase completes.
 
 ## Phase 2 — Secrets and trust
 
