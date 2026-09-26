@@ -132,6 +132,10 @@ func TestValidate_ImageRegistry(t *testing.T) {
 		{image: "mapped.example/x"},       // IPv4-mapped loopback
 		{image: "cgnat.example/x"},        // CGNAT / Alibaba metadata
 		{image: "unresolvable.example/x"}, // lookup fails: fail closed
+		{image: "LOCALHOST/x"},            // Docker reads upper case as a host; imagePattern must refuse it
+		{image: "Metadata/x"},
+		{image: "user@registry.example/x"},
+		{image: "[fe80::1%eth0]:5000/x"},
 		{image: "mirror.corp.example:5000/x", allowlist: []string{"mirror.corp.example"}}, // port must match too
 		{image: "docker.io/library/alpine", allowed: true},
 		{image: "alpine:3.20", allowed: true},
@@ -291,6 +295,12 @@ func TestParseDiskLimit(t *testing.T) {
 		{in: "10X", wantErr: true},
 		{in: "10GG", wantErr: true},
 		{in: "99999999999T", wantErr: true},
+		{in: "64M", want: 64 << 20},
+		{in: "63M", wantErr: true}, // below the minimum: every job would fail
+		{in: "1", wantErr: true},
+		{in: "10i", wantErr: true},
+		{in: "10ib", wantErr: true},
+		{in: "+5G", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {

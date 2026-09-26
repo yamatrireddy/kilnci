@@ -161,9 +161,16 @@ func (a *Agent) runJob(ctx context.Context, j *runnerv1.Job) {
 	jobCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	up := newUploader(ctx, a.conn.Client(), j.GetJobId(), j.GetLeaseId(), log)
 	masks := append([]string{}, j.GetMaskValues()...)
 	masks = append(masks, credentialParts(j.GetCheckout().GetAuthorizationHeader())...)
+	if err := mask.Check(masks); err != nil {
+		// Fail closed: the job's output could not be masked safely.
+		log.ErrorContext(ctx, "refusing job", "error", err)
+		a.complete(ctx, j, executor.Result{Outcome: executor.Failed, ExitCode: -1,
+			Reason: "the job's sensitive values are too large to mask"}, log)
+		return
+	}
+	up := newUploader(ctx, a.conn.Client(), j.GetJobId(), j.GetLeaseId(), log)
 	out := mask.New(up, masks)
 	if a.opts.EgressUnrestricted {
 		_, _ = out.Write([]byte("==> WARNING: this runner does not restrict network egress from jobs " +

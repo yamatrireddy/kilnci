@@ -55,7 +55,11 @@ func isBlockedAddr(a netip.Addr) bool {
 // registryHost returns the registry host[:port] of an image reference, or ""
 // for Docker Hub references (whose first component names a namespace, not a
 // host). It follows the Docker reference grammar: the first component is a
-// host if it contains '.' or ':' or is "localhost".
+// host if it contains '.' or ':' or is "localhost". Docker also treats a
+// first component with an upper-case letter as a host; such references
+// (and IPv6 literals, userinfo) never get here because validate's
+// imagePattern accepts lower-case references only
+// (TestValidate_ImageRegistry keeps it that way).
 func registryHost(image string) string {
 	first, _, hasSlash := strings.Cut(image, "/")
 	if !hasSlash {

@@ -33,6 +33,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"sort"
@@ -53,6 +54,40 @@ const minLen = 4
 // the value) that it does not match unrelated output.
 const wrapWindow = 16
 
+// Size limits (security review). Masking cost grows with the values: the
+// held-back window grows with the longest encoded variant, and the
+// wrapped-base64 windows with each value's length.
+const (
+	// MaxValueBytes is the largest value Check accepts.
+	MaxValueBytes = 64 << 10
+	// MaxTotalBytes is the most Check accepts across all values.
+	MaxTotalBytes = 256 << 10
+	// maxWrapValueBytes is the largest value whose line-wrapped base64 is
+	// masked; longer values are still masked in every other form.
+	maxWrapValueBytes = 4 << 10
+)
+
+// ErrTooLarge means the values to mask exceed MaxValueBytes or
+// MaxTotalBytes.
+var ErrTooLarge = errors.New("mask: values too large to mask")
+
+// Check reports whether values are within the size limits. Callers must
+// not run a job whose values fail Check: masking them would use unbounded
+// memory and delay output, so the job fails closed instead.
+func Check(values []string) error {
+	total := 0
+	for _, v := range values {
+		if len(v) > MaxValueBytes {
+			return fmt.Errorf("%w: a value is %d bytes (limit %d)", ErrTooLarge, len(v), MaxValueBytes)
+		}
+		total += len(v)
+	}
+	if total > MaxTotalBytes {
+		return fmt.Errorf("%w: values total %d bytes (limit %d)", ErrTooLarge, total, MaxTotalBytes)
+	}
+	return nil
+}
+
 // Writer masks values in everything written to it and forwards the result
 // to the underlying writer. It is safe for concurrent use.
 type Writer struct {
@@ -69,6 +104,8 @@ type Writer struct {
 }
 
 // New returns a Writer that masks values (and their encodings) written to w.
+// Callers check values with Check first. Line-wrapped base64 is masked only
+// for values of at most 4 KiB.
 func New(w io.Writer, values []string) *Writer {
 	exact := map[string]bool{}
 	windows := map[string]struct{}{}
@@ -77,6 +114,9 @@ func New(w io.Writer, values []string) *Writer {
 			if len(variant) >= minLen {
 				exact[variant] = true
 			}
+		}
+		if len(v) > maxWrapValueBytes {
+			continue
 		}
 		for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding} {
 			for _, s := range alignedBase64(enc, []byte(v)) {

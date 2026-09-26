@@ -408,3 +408,48 @@ func FuzzMask_SplitInvariant(f *testing.F) {
 		}
 	})
 }
+
+// TestCheck_Limits: values beyond the size limits are refused (security
+// review: masking cost grows without bound with the values).
+func TestCheck_Limits(t *testing.T) {
+	big := strings.Repeat("v", MaxValueBytes)
+	for _, tc := range []struct {
+		name   string
+		values []string
+		ok     bool
+	}{
+		{"none", nil, true},
+		{"at the value limit", []string{big}, true},
+		{"over the value limit", []string{big + "v"}, false},
+		{"at the total limit", []string{big, big, big, big}, true},
+		{"over the total limit", []string{big, big, big, big, "v"}, false},
+	} {
+		if err := Check(tc.values); (err == nil) != tc.ok || (err != nil && !errors.Is(err, ErrTooLarge)) {
+			t.Errorf("%s: Check = %v", tc.name, err)
+		}
+	}
+}
+
+// TestNew_LargeValueCostIsBounded: a value at the limit keeps the held-back
+// window proportional to its own encodings (no wrapped-base64 windows) and
+// is still masked.
+func TestNew_LargeValueCostIsBounded(t *testing.T) {
+	v := strings.Repeat("s3cr3t-", MaxValueBytes/7)
+	var out bytes.Buffer
+	w := New(&out, []string{v})
+	if len(w.windows) != 0 {
+		t.Fatalf("%d wrapped-base64 windows for a %d-byte value", len(w.windows), len(v))
+	}
+	if w.hold > 6*MaxValueBytes {
+		t.Fatalf("hold = %d", w.hold)
+	}
+	if _, err := w.Write([]byte("x" + v + "y")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "x"+Replacement+"y" {
+		t.Fatalf("output has %d bytes", out.Len())
+	}
+}

@@ -16,6 +16,10 @@ import (
 // job's workspace volume unless the operator sets another limit.
 const DefaultDiskLimitBytes int64 = 10 << 30
 
+// MinDiskLimitBytes is the smallest limit ParseDiskLimit accepts; smaller
+// limits would fail every job.
+const MinDiskLimitBytes int64 = 64 << 20
+
 // errDiskLimitUnsupported means the Docker daemon cannot enforce the job
 // disk limit. Jobs then fail rather than run without one.
 var errDiskLimitUnsupported = errors.New("docker storage cannot enforce the job disk limit")
@@ -81,12 +85,15 @@ func ParseDiskLimit(s string) (limit int64, disabled bool, err error) {
 		return 0, true, nil
 	}
 	num := strings.TrimRight(s, "kmgtib")
-	unit := strings.TrimSuffix(strings.TrimSuffix(s[len(num):], "b"), "i")
+	unit := strings.TrimSuffix(s[len(num):], "b")
+	if unit != "" && unit != "i" {
+		unit = strings.TrimSuffix(unit, "i") // "gi" -> "g"; a bare "i" stays invalid
+	}
 	shift := map[string]uint{"": 0, "k": 10, "m": 20, "g": 30, "t": 40}
 	sh, ok := shift[unit]
-	n, perr := strconv.ParseInt(num, 10, 64)
-	if !ok || perr != nil || n <= 0 || n > (1<<62)>>sh {
-		return 0, false, fmt.Errorf("invalid disk limit %q: want a size such as 10G, or off", s)
+	n, perr := strconv.ParseUint(num, 10, 63)
+	if !ok || perr != nil || n == 0 || n > (1<<62)>>sh || int64(n)<<sh < MinDiskLimitBytes {
+		return 0, false, fmt.Errorf("invalid disk limit %q: want a size of at least 64M such as 10G, or off", s)
 	}
-	return n << sh, false, nil
+	return int64(n) << sh, false, nil
 }

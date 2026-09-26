@@ -190,6 +190,59 @@ func TestUploader_FinalFlushFailures(t *testing.T) {
 	}
 }
 
+// commitThenTimeout stores chunk 0 on the first call but answers every
+// call carrying it with DeadlineExceeded, like a server that commits and
+// then responds too late. A different chunk 0 conflicts, as on the server.
+type commitThenTimeout struct {
+	mu     sync.Mutex
+	chunks [][]byte
+}
+
+func (s *commitThenTimeout) AppendLogs(_ context.Context, req *runnerv1.AppendLogsRequest, _ ...grpc.CallOption) (*runnerv1.AppendLogsResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seq, data := int(req.GetSeq()), req.GetData()
+	if seq < len(s.chunks) {
+		if !bytes.Equal(s.chunks[seq], data) {
+			return nil, status.Error(codes.Aborted, "conflicting chunk")
+		}
+		if seq == 0 {
+			return nil, status.Error(codes.DeadlineExceeded, "late")
+		}
+		return &runnerv1.AppendLogsResponse{}, nil
+	}
+	if seq != len(s.chunks) {
+		return nil, status.Error(codes.InvalidArgument, "out of order")
+	}
+	s.chunks = append(s.chunks, append([]byte(nil), data...))
+	if seq == 0 {
+		return nil, status.Error(codes.DeadlineExceeded, "late")
+	}
+	return &runnerv1.AppendLogsResponse{}, nil
+}
+
+// TestUploader_ChunkStoredDespiteFailuresIsNotReplaced: when a chunk given
+// up on had in fact been stored, the marker sent in its place conflicts;
+// the uploader continues after it instead of stopping (security review).
+func TestUploader_ChunkStoredDespiteFailuresIsNotReplaced(t *testing.T) {
+	srv := &commitThenTimeout{}
+	u, logs := makeUploaderUnstarted(t, srv)
+	first := strings.Repeat("A", maxChunkBytes)
+	_, _ = u.Write([]byte(first))
+	_, _ = u.Write([]byte("BBBB"))
+	u.start(t.Context())
+	u.Close(t.Context())
+	srv.mu.Lock()
+	got := string(bytes.Join(srv.chunks, nil))
+	srv.mu.Unlock()
+	if got != first+"BBBB" {
+		t.Fatalf("server log has %d bytes, suffix %q", len(got), got[max(0, len(got)-20):])
+	}
+	if !strings.Contains(logs.String(), "was stored; continuing") {
+		t.Fatalf("log = %s", logs.String())
+	}
+}
+
 // makeUploaderUnstarted buffers writes before the loop runs, so the final
 // flush sees them all at once.
 func makeUploaderUnstarted(t *testing.T, c logClient) (*uploader, *syncBuffer) {

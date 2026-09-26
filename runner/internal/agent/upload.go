@@ -157,6 +157,17 @@ func (u *uploader) flush(ctx context.Context, all bool) {
 			if !all && len(u.buf) < flushBytes {
 				return
 			}
+		case c == codes.Aborted && droppedLast:
+			// The chunk given up on was stored after all (its calls failed
+			// only after the server committed it), so the marker that
+			// replaced it conflicts. Nothing was lost: drop the marker and
+			// send the rest after it.
+			u.mu.Lock()
+			u.buf = u.buf[len(markerUploadFailed):]
+			u.seq++
+			u.mu.Unlock()
+			u.log.Warn("log chunk thought lost was stored; continuing", "seq", seq)
+			attempt, droppedLast = 0, false
 		case c == codes.NotFound || c == codes.Unauthenticated || c == codes.InvalidArgument || c == codes.Aborted:
 			// Lease lost or the chunk was refused (Aborted: the server holds
 			// a conflicting chunk): nothing more can be sent, and the server
