@@ -3,10 +3,13 @@
 package config
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -290,5 +293,101 @@ func TestSecret_NeverFormatsValue(t *testing.T) {
 	}
 	if s.Reveal() != fakeOIDCSecret || s.IsZero() || !(Secret{}).IsZero() {
 		t.Fatal("Reveal/IsZero wrong")
+	}
+}
+
+func TestLoad_SecretsProvider(t *testing.T) {
+	// Test-only key material built at runtime; not a real key.
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	prev := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
+	with := func(kv map[string]string) map[string]string {
+		env := validEnv()
+		maps.Copy(env, kv)
+		return env
+	}
+	files := map[string]string{"/run/kek": key + "\n", "/run/prev": prev, "/run/short": "c2hvcnQ=", "/t": "tok", "/run/vault-token": "tok", "/run/ca.pem": "pem"}
+
+	c, err := Load(source(validEnv(), nil), false)
+	if err != nil || c.Secrets.Enabled() {
+		t.Fatalf("secrets must be off by default: %v", err)
+	}
+
+	c, err = Load(source(with(map[string]string{
+		"KILN_SECRETS_PROVIDER": "local", "KILN_MASTER_KEY_FILE": "/run/kek", "KILN_MASTER_KEY_PREVIOUS_FILE": "/run/prev",
+	}), files), false)
+	if err != nil {
+		t.Fatalf("local: %v", err)
+	}
+	if !c.Secrets.Enabled() || c.Secrets.MasterKey.IsZero() || c.Secrets.MasterKeyPrevious.IsZero() {
+		t.Fatalf("local provider not loaded: %+v", c.Secrets)
+	}
+	cur, old, err := c.Secrets.MasterKeys()
+	if err != nil || !bytes.Equal(cur, bytes.Repeat([]byte{7}, 32)) || !bytes.Equal(old, bytes.Repeat([]byte{9}, 32)) {
+		t.Fatalf("MasterKeys: %v", err)
+	}
+	if _, _, err := (Secrets{MasterKey: NewSecret("bad")}).MasterKeys(); err == nil || strings.Contains(err.Error(), "bad") {
+		t.Fatalf("bad key: %v", err)
+	}
+	if _, _, err := (Secrets{MasterKey: NewSecret(key), MasterKeyPrevious: NewSecret("bad")}).MasterKeys(); err == nil {
+		t.Fatal("bad previous key accepted")
+	}
+
+	// KILN_MASTER_KEY from the environment is for embedded or development only.
+	if _, err := Load(source(with(map[string]string{"KILN_SECRETS_PROVIDER": "local", "KILN_MASTER_KEY": key}), files), true); err != nil {
+		t.Fatalf("embedded with env master key: %v", err)
+	}
+
+	c, err = Load(source(with(map[string]string{
+		"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://vault.internal:8200",
+		"KILN_VAULT_TRANSIT_KEY": "kiln", "KILN_VAULT_TOKEN_FILE": "/run/vault-token", "KILN_VAULT_NAMESPACE": "team/ci",
+		"KILN_VAULT_CACERT_FILE": "/run/ca.pem", "KILN_VAULT_ALLOWED_PREFIXES": "10.20.0.0/16",
+	}), files), false)
+	if err != nil {
+		t.Fatalf("vault: %v", err)
+	}
+	if c.Secrets.Vault.Mount != "transit" || c.Secrets.Vault.Addr.Host != "vault.internal:8200" || len(c.Secrets.Vault.AllowedPrefixes) != 1 || len(c.HTTP.EgressAllowedPrefixes) != 0 {
+		t.Fatalf("vault defaults: %+v", c.Secrets.Vault)
+	}
+
+	dev := map[string]string{"KILN_ENV": "development", "KILN_PUBLIC_URL": "http://localhost:8080", "KILN_TLS_MODE": "upstream"}
+	devVault := with(dev)
+	maps.Copy(devVault, map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "http://127.0.0.1:8200", "KILN_VAULT_TRANSIT_KEY": "kiln", "KILN_VAULT_TOKEN_FILE": "/t"})
+	if _, err := Load(source(devVault, files), false); err != nil {
+		t.Fatalf("development loopback Vault over http: %v", err)
+	}
+
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string
+	}{
+		"unknown provider":           {map[string]string{"KILN_SECRETS_PROVIDER": "kms"}, "must be empty, local, or vault"},
+		"key without provider":       {map[string]string{"KILN_MASTER_KEY_FILE": "/run/kek"}, "KILN_SECRETS_PROVIDER must be set"},
+		"local without key":          {map[string]string{"KILN_SECRETS_PROVIDER": "local"}, "KILN_MASTER_KEY_FILE (or KILN_MASTER_KEY) is required"},
+		"local short key":            {map[string]string{"KILN_SECRETS_PROVIDER": "local", "KILN_MASTER_KEY_FILE": "/run/short"}, "must be 32 bytes"},
+		"local bad previous":         {map[string]string{"KILN_SECRETS_PROVIDER": "local", "KILN_MASTER_KEY_FILE": "/run/kek", "KILN_MASTER_KEY_PREVIOUS_FILE": "/run/short"}, "PREVIOUS_FILE must hold 32 bytes"},
+		"local with vault addr":      {map[string]string{"KILN_SECRETS_PROVIDER": "local", "KILN_MASTER_KEY_FILE": "/run/kek", "KILN_VAULT_ADDR": "https://v"}, "KILN_VAULT_ADDR is set but KILN_SECRETS_PROVIDER is not vault"},
+		"vault key without provider": {map[string]string{"KILN_VAULT_TRANSIT_KEY": "kiln"}, "KILN_VAULT_TRANSIT_KEY is set but"},
+		"vault prefixes with local":  {map[string]string{"KILN_SECRETS_PROVIDER": "local", "KILN_MASTER_KEY_FILE": "/run/kek", "KILN_VAULT_ALLOWED_PREFIXES": "10.0.0.0/8"}, "KILN_VAULT_ALLOWED_PREFIXES is set but"},
+		"master key in env (prod)":   {map[string]string{"KILN_SECRETS_PROVIDER": "local", "KILN_MASTER_KEY": key}, "use KILN_MASTER_KEY_FILE"},
+		"vault token unreadable":     {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://v", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/missing"}, "KILN_VAULT_TOKEN_FILE: cannot read file"},
+		"vault CA unreadable":        {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://v", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/t", "KILN_VAULT_CACERT_FILE": "/missing"}, "KILN_VAULT_CACERT_FILE: cannot read file"},
+		"vault with master key":      {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_MASTER_KEY_FILE": "/run/kek", "KILN_VAULT_ADDR": "https://v", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/t"}, "KILN_MASTER_KEY is set"},
+		"vault missing everything":   {map[string]string{"KILN_SECRETS_PROVIDER": "vault"}, "KILN_VAULT_ADDR is required"},
+		"vault missing token":        {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://v", "KILN_VAULT_TRANSIT_KEY": "k"}, "KILN_VAULT_TOKEN_FILE is required"},
+		"vault http in production":   {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "http://vault:8200", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/t"}, "must be an https URL"},
+		"vault credentials in URL":   {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://u:p@vault", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/t"}, "must be an https URL"},
+		"vault path in URL":          {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://vault/v1/other", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/t"}, "must be an https URL"},
+		"vault key traversal":        {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://v", "KILN_VAULT_TRANSIT_KEY": "../sys/seal", "KILN_VAULT_TOKEN_FILE": "/t"}, "KILN_VAULT_TRANSIT_KEY is required"},
+		"vault mount traversal":      {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://v", "KILN_VAULT_TRANSIT_MOUNT": "a/b", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/t"}, "KILN_VAULT_TRANSIT_MOUNT must match"},
+		"vault namespace traversal":  {map[string]string{"KILN_SECRETS_PROVIDER": "vault", "KILN_VAULT_ADDR": "https://v", "KILN_VAULT_TRANSIT_KEY": "k", "KILN_VAULT_TOKEN_FILE": "/t", "KILN_VAULT_NAMESPACE": "../x"}, "KILN_VAULT_NAMESPACE must match"},
+	} {
+		_, err := Load(source(with(tc.env), files), false)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+			continue
+		}
+		if strings.Contains(err.Error(), key) || strings.Contains(err.Error(), prev) {
+			t.Errorf("%s: error contains key material", name)
+		}
 	}
 }

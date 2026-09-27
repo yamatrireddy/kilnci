@@ -13,6 +13,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -62,6 +63,7 @@ type Config struct {
 	Logs     Logs
 	NATS     NATS
 	GitHub   GitHub
+	Secrets  Secrets
 }
 
 // HTTP configures the listener and HTTP behavior.
@@ -194,6 +196,65 @@ type GitHub struct {
 // Enabled reports whether the GitHub App is configured.
 func (g GitHub) Enabled() bool { return g.AppID > 0 }
 
+// Secrets providers (ADR-0009 §2).
+const (
+	SecretsProviderNone  = ""
+	SecretsProviderLocal = "local"
+	SecretsProviderVault = "vault"
+)
+
+// Secrets configures the key-encryption key (KEK) provider for pipeline
+// secrets (ADR-0009). An empty Provider turns the secrets feature off; Kiln
+// never generates or defaults a master key.
+type Secrets struct {
+	Provider string
+	// MasterKey is the local provider's base64-encoded 32-byte KEK
+	// (KILN_MASTER_KEY_FILE, or KILN_MASTER_KEY for single-node installs).
+	MasterKey Secret
+	// MasterKeyPrevious is accepted for unwrapping only, during rotation.
+	MasterKeyPrevious Secret
+	Vault             Vault
+}
+
+// Enabled reports whether a KEK provider is configured.
+func (s Secrets) Enabled() bool { return s.Provider != SecretsProviderNone }
+
+// Vault configures HashiCorp Vault Transit as the KEK provider.
+type Vault struct {
+	// Addr is Vault's base URL (https, or http on loopback in development).
+	Addr *url.URL
+	// Mount is the Transit secrets engine mount path (default "transit").
+	Mount string
+	// TransitKey names a derived Transit key.
+	TransitKey string
+	// TokenFile holds the Vault token; it is re-read when it changes, so a
+	// Vault agent can renew it.
+	TokenFile string
+	// Namespace is the Vault Enterprise namespace, if any.
+	Namespace string
+	// CACertFile is a PEM CA bundle trusted by the Vault client only.
+	CACertFile string
+	// AllowedPrefixes are private ranges the Vault client (and only it) may
+	// reach, so a private Vault never widens the global egress allowlist
+	// (KILN_EGRESS_ALLOWED_PREFIXES) that user-influenced URLs go through.
+	AllowedPrefixes []netip.Prefix
+}
+
+// MasterKeys decodes the local provider's current and (optional) previous
+// master keys. Callers should clear the returned slices when done.
+func (s Secrets) MasterKeys() (current, previous []byte, err error) {
+	current, err = decodeKey32(s.MasterKey)
+	if err != nil {
+		return nil, nil, errors.New("KILN_MASTER_KEY: must be 32 bytes, base64-encoded")
+	}
+	if !s.MasterKeyPrevious.IsZero() {
+		if previous, err = decodeKey32(s.MasterKeyPrevious); err != nil {
+			return nil, nil, errors.New("KILN_MASTER_KEY_PREVIOUS_FILE: must be 32 bytes, base64-encoded")
+		}
+	}
+	return current, previous, nil
+}
+
 // Tracing configures OpenTelemetry export.
 type Tracing struct {
 	// OTLPEndpoint (host:port) enables OTLP/HTTP trace export when set.
@@ -291,6 +352,42 @@ func Load(src Source, embedded bool) (*Config, error) {
 	c.GitHub.PrivateKey = p.secretFile("KILN_GITHUB_APP_PRIVATE_KEY_FILE")
 	c.GitHub.WebhookSecret = p.secret("KILN_GITHUB_WEBHOOK_SECRET")
 	c.GitHub.APIURL = p.str("KILN_GITHUB_API_URL", "https://api.github.com")
+
+	c.Secrets.Provider = p.str("KILN_SECRETS_PROVIDER", SecretsProviderNone)
+	c.Secrets.MasterKey = p.secret("KILN_MASTER_KEY")
+	c.Secrets.MasterKeyPrevious = p.secretFile("KILN_MASTER_KEY_PREVIOUS_FILE")
+	c.Secrets.Vault.Addr = p.url("KILN_VAULT_ADDR")
+	c.Secrets.Vault.Mount = p.str("KILN_VAULT_TRANSIT_MOUNT", "transit")
+	c.Secrets.Vault.TransitKey = p.str("KILN_VAULT_TRANSIT_KEY", "")
+	c.Secrets.Vault.TokenFile = p.str("KILN_VAULT_TOKEN_FILE", "")
+	c.Secrets.Vault.Namespace = p.str("KILN_VAULT_NAMESPACE", "")
+	c.Secrets.Vault.CACertFile = p.str("KILN_VAULT_CACERT_FILE", "")
+	c.Secrets.Vault.AllowedPrefixes = p.prefixes("KILN_VAULT_ALLOWED_PREFIXES")
+	if c.Secrets.Provider != SecretsProviderVault {
+		for _, k := range []string{"KILN_VAULT_ADDR", "KILN_VAULT_TRANSIT_MOUNT", "KILN_VAULT_TRANSIT_KEY", "KILN_VAULT_TOKEN_FILE",
+			"KILN_VAULT_NAMESPACE", "KILN_VAULT_CACERT_FILE", "KILN_VAULT_ALLOWED_PREFIXES"} {
+			if _, ok := p.get(k); ok {
+				p.errs = append(p.errs, fmt.Errorf("%s is set but KILN_SECRETS_PROVIDER is not vault", k))
+			}
+		}
+	} else {
+		// Fail at startup, not at the first lease, when the token or CA
+		// file is unreadable. Contents are not kept here.
+		for k, path := range map[string]string{"KILN_VAULT_TOKEN_FILE": c.Secrets.Vault.TokenFile, "KILN_VAULT_CACERT_FILE": c.Secrets.Vault.CACertFile} {
+			if path == "" {
+				continue
+			}
+			if _, err := src.ReadFile(path); err != nil {
+				p.errs = append(p.errs, fmt.Errorf("%s: cannot read file", k))
+			}
+		}
+	}
+	// The environment leaks through process listings, orchestrator UIs,
+	// and crash reports; a master key there is tolerated only for
+	// single-node (embedded) installs and development (ADR-0009 §2).
+	if _, inEnv := p.get("KILN_MASTER_KEY"); inEnv && !embedded && !isDev {
+		p.errs = append(p.errs, errors.New("KILN_MASTER_KEY is accepted only with --embedded or KILN_ENV=development; use KILN_MASTER_KEY_FILE"))
+	}
 
 	c.Tracing.OTLPEndpoint = p.str("KILN_OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	c.Tracing.Insecure = p.bool("KILN_OTEL_EXPORTER_OTLP_INSECURE", false)
@@ -447,6 +544,8 @@ func (c *Config) validate() []error {
 		}
 	}
 
+	errs = append(errs, c.validateSecrets()...)
+
 	if c.Runner.Enabled() {
 		if len(c.Runner.Hostnames) == 0 {
 			add("KILN_RUNNER_HOSTNAMES is required when KILN_RUNNER_CA_DIR is set (names runners use to reach this server)")
@@ -461,6 +560,77 @@ func (c *Config) validate() []error {
 		}
 	}
 	return errs
+}
+
+// vaultPathSegment is a Transit mount or key name: no slashes, dots, or
+// characters that would change the request path.
+var vaultPathSegment = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+func (c *Config) validateSecrets() []error {
+	var errs []error
+	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+	s := c.Secrets
+	switch s.Provider {
+	case SecretsProviderNone:
+		if !s.MasterKey.IsZero() || !s.MasterKeyPrevious.IsZero() {
+			add("KILN_SECRETS_PROVIDER must be set (local or vault) when secrets keys are configured")
+		}
+	case SecretsProviderLocal:
+		if s.MasterKey.IsZero() {
+			add("KILN_MASTER_KEY_FILE (or KILN_MASTER_KEY) is required when KILN_SECRETS_PROVIDER=local")
+		} else if !isKey32(s.MasterKey) {
+			add("KILN_MASTER_KEY must be 32 bytes, base64-encoded (e.g. openssl rand -base64 32)")
+		}
+		if !s.MasterKeyPrevious.IsZero() && !isKey32(s.MasterKeyPrevious) {
+			add("KILN_MASTER_KEY_PREVIOUS_FILE must hold 32 bytes, base64-encoded")
+		}
+	case SecretsProviderVault:
+		if !s.MasterKey.IsZero() || !s.MasterKeyPrevious.IsZero() {
+			add("KILN_MASTER_KEY is set but KILN_SECRETS_PROVIDER=vault")
+		}
+		if s.Vault.Addr == nil {
+			add("KILN_VAULT_ADDR is required when KILN_SECRETS_PROVIDER=vault")
+		} else {
+			u := s.Vault.Addr
+			ok := u.Scheme == "https" || (u.Scheme == "http" && c.IsDevelopment() && isLoopbackHost(u.Hostname()))
+			if !ok || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+				add("KILN_VAULT_ADDR must be an https URL without credentials, path, or query (http only on loopback in development)")
+			}
+		}
+		if !vaultPathSegment.MatchString(s.Vault.Mount) {
+			add("KILN_VAULT_TRANSIT_MOUNT must match %s", vaultPathSegment)
+		}
+		if !vaultPathSegment.MatchString(s.Vault.TransitKey) {
+			add("KILN_VAULT_TRANSIT_KEY is required when KILN_SECRETS_PROVIDER=vault and must match %s", vaultPathSegment)
+		}
+		if s.Vault.TokenFile == "" {
+			add("KILN_VAULT_TOKEN_FILE is required when KILN_SECRETS_PROVIDER=vault")
+		}
+		if s.Vault.Namespace != "" && !vaultNamespace.MatchString(s.Vault.Namespace) {
+			add("KILN_VAULT_NAMESPACE must match %s", vaultNamespace)
+		}
+	default:
+		add("KILN_SECRETS_PROVIDER must be empty, local, or vault")
+	}
+	return errs
+}
+
+var vaultNamespace = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}(/[A-Za-z0-9_-]{1,64}){0,7}$`)
+
+// isKey32 reports whether s is exactly 32 bytes in standard base64.
+func isKey32(s Secret) bool {
+	b, err := decodeKey32(s)
+	clear(b)
+	return err == nil
+}
+
+func decodeKey32(s Secret) ([]byte, error) {
+	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s.Reveal()))
+	if err != nil || len(b) != 32 {
+		clear(b)
+		return nil, errors.New("not a 32-byte base64 key")
+	}
+	return b, nil
 }
 
 var hostnamePattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)

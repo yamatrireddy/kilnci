@@ -18,6 +18,7 @@ package httpclient
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -42,6 +43,9 @@ type Options struct {
 	AllowedPrefixes []netip.Prefix
 	// UserAgent is sent on every request. Default "kiln-server".
 	UserAgent string
+	// RootCAs, if set, replaces the system roots for this client only (e.g.
+	// a private CA for Vault), so no other client trusts it.
+	RootCAs *x509.CertPool
 }
 
 // New returns a hardened *http.Client.
@@ -61,7 +65,7 @@ func New(opts Options) *http.Client {
 	transport := &http.Transport{
 		Proxy:                 nil, // never use environment proxies
 		DialContext:           dialer.DialContext,
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: opts.RootCAs},
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: opts.Timeout,
 		ExpectContinueTimeout: time.Second,

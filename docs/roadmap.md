@@ -10,7 +10,7 @@ and desktop use.
 
 **Current status (2026-09-26):** Phase 1 is active. All twelve Phase 1 slices are
 merged; the phase closes once its exit criteria are verified end to end (see
-[Closing Phase 1](#closing-phase-1)). Phases 2 to 5 have not started.
+[Closing Phase 1](#closing-phase-1)). Phase 2 is in progress (2026-09-27); Phases 3 to 5 have not started.
 
 ---
 
@@ -74,11 +74,29 @@ runners and repository linking have no UI yet (API only). To close the phase:
 - Close or explicitly defer each item under [Phase 1 follow-ups](#phase-1-follow-ups).
 - Update "Current status" in `CLAUDE.md` and the README when the phase completes.
 
-## Phase 2 — Secrets and trust
+## Phase 2 — Secrets and trust (in progress)
 
 Envelope encryption (local key, Vault Transit, KMS), scoped secrets, fork-PR
 policies, trusted/untrusted runner pools, cache scoping by trust level,
 `platform/httpclient` SSRF suite, hash-chained audit log with SIEM export.
+
+Trusted/untrusted runner pools (ADR-0005 §9) and the hash-chained audit log
+shipped earlier; Phase 2 builds on them.
+
+| Slice | Scope | Status |
+|---|---|---|
+| 0. ADR + crypto | ADR-0009 (secrets); `internal/secrets`: AES-256-GCM envelope encryption, per-org DEKs, `local` and Vault Transit KEK providers, DEK cache; `KILN_SECRETS_PROVIDER` config | in review |
+| 1. Secrets API | Org and project secrets, org-secret project allow-lists, branch patterns, write-only values, warnings for values under 4 bytes, audit events; dedicated Vault client and startup key checks wired in | planned |
+| 2. Delivery | Per-step `secrets:` in the pipeline spec; protected-branch pushes only (recorded at run creation) unless an admin widens a secret; trusted runners only; resolved and audited at lease time; `KILN_SECRETS_WITHHELD` otherwise | planned |
+| 3. Rotation | `kiln-server secrets rewrap` (KEK, refuses to finish while DEKs remain on other keys) and `rotate-dek` (per org); KEK-compromise runbook | planned |
+| 4. Fork-PR policy | Per-project approval policy; test that approving a fork run cannot apply to a later push | planned |
+| 5. SSRF suite | Table-driven `platform/httpclient` suite (rebinding, mapped IPv6, odd IP encodings, redirects) | planned |
+| 6. Audit SIEM export | HMAC-signed HTTPS JSON and syslog over TLS (ADR first) | planned |
+| 7. Web secrets page | Manage secrets in the web app | planned |
+
+Deferred: cloud KMS providers (large SDK dependencies; the provider interface
+is ready for them) and cache scoping by trust level (Kiln has no cache
+feature yet; scoping lands with it).
 
 ## Phase 3 — GitOps
 
