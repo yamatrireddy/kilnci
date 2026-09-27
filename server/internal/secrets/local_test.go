@@ -121,3 +121,17 @@ func TestLocalKey_DerivationKnownAnswer(t *testing.T) {
 }
 
 const wantLocalKeyID = "local:e313d524fcdf09e9"
+
+func TestLocalWrapper_KeyIDs(t *testing.T) {
+	cur, prev := testKey(t), testKey(t)
+	w, _ := NewLocalWrapper(cur, prev)
+	ids := w.KeyIDs()
+	wk, _ := w.Wrap(context.Background(), "o", testKey(t))
+	if len(ids) != 2 || ids[0] != wk.KeyID || ids[1] == ids[0] {
+		t.Fatalf("KeyIDs = %v", ids)
+	}
+	single, _ := NewLocalWrapper(cur, nil)
+	if len(single.KeyIDs()) != 1 {
+		t.Fatal("previous key listed without one")
+	}
+}

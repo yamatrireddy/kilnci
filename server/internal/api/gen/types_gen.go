@@ -231,6 +231,24 @@ func (e RunStatus) Valid() bool {
 	}
 }
 
+// Defines values for SecretScope.
+const (
+	SecretScopeOrg     SecretScope = "org"
+	SecretScopeProject SecretScope = "project"
+)
+
+// Valid indicates whether the value is a known member of the SecretScope enum.
+func (e SecretScope) Valid() bool {
+	switch e {
+	case SecretScopeOrg:
+		return true
+	case SecretScopeProject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SessionAuthMethod.
 const (
 	SessionAuthMethodBearer  SessionAuthMethod = "bearer"
@@ -360,6 +378,9 @@ type AuditEventList struct {
 	Items      []AuditEvent `json:"items"`
 	NextCursor *string      `json:"nextCursor,omitempty"`
 }
+
+// BranchPattern A branch name, "*", or a prefix ending in "/*". Patterns only narrow delivery; they never make an unprotected branch eligible.
+type BranchPattern = string
 
 // FieldError defines model for FieldError.
 type FieldError struct {
@@ -668,6 +689,60 @@ type RunnerRegistrationTokenCreated struct {
 	Token string `json:"token"`
 }
 
+// Secret defines model for Secret.
+type Secret struct {
+	AllProjects      *bool     `json:"allProjects,omitempty"`
+	AllowUnprotected bool      `json:"allowUnprotected"`
+	Branches         []string  `json:"branches"`
+	CreatedAt        time.Time `json:"createdAt"`
+	CreatedBy        *string   `json:"createdBy,omitempty"`
+
+	// Masked False when the value is shorter than 4 bytes and cannot be masked in logs.
+	Masked bool `json:"masked"`
+
+	// Name Environment-variable name. The KILN_, LD_, DYLD_, GIT_, and SSH_ prefixes and names such as PATH are reserved.
+	Name         SecretName  `json:"name"`
+	ProjectSlugs *[]Slug     `json:"projectSlugs,omitempty"`
+	Scope        SecretScope `json:"scope"`
+	UpdatedAt    time.Time   `json:"updatedAt"`
+	UpdatedBy    *string     `json:"updatedBy,omitempty"`
+	ValueVersion int64       `json:"valueVersion"`
+}
+
+// SecretScope defines model for Secret.Scope.
+type SecretScope string
+
+// SecretList defines model for SecretList.
+type SecretList struct {
+	Items      []Secret `json:"items"`
+	NextCursor *string  `json:"nextCursor,omitempty"`
+}
+
+// SecretName Environment-variable name. The KILN_, LD_, DYLD_, GIT_, and SSH_ prefixes and names such as PATH are reserved.
+type SecretName = string
+
+// SecretPut defines model for SecretPut.
+type SecretPut struct {
+	// AllProjects Org secrets only. Every project of the org may use the secret.
+	AllProjects *bool `json:"allProjects,omitempty"`
+
+	// AllowUnprotected Deliver to every trusted run of the scope, not only pushes to protected branches. Anyone with push access can then read the value.
+	AllowUnprotected *bool            `json:"allowUnprotected,omitempty"`
+	Branches         *[]BranchPattern `json:"branches,omitempty"`
+
+	// ProjectSlugs Org secrets only. The projects that may use the secret.
+	ProjectSlugs *[]Slug `json:"projectSlugs,omitempty"`
+
+	// Value At most 64 KiB of UTF-8 text without NUL bytes; encode binary values (for example as base64). Never returned.
+	Value *string `json:"value,omitempty"`
+}
+
+// SecretWritten defines model for SecretWritten.
+type SecretWritten struct {
+	Secret   Secret   `json:"secret"`
+	Warnings []string `json:"warnings"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	AuthMethod SessionAuthMethod `json:"authMethod"`
@@ -755,11 +830,20 @@ type NotFound = Problem
 // PayloadTooLarge RFC 9457 problem details.
 type PayloadTooLarge = Problem
 
+// PreconditionFailed RFC 9457 problem details.
+type PreconditionFailed = Problem
+
+// PreconditionRequired RFC 9457 problem details.
+type PreconditionRequired = Problem
+
 // RateLimited RFC 9457 problem details.
 type RateLimited = Problem
 
 // Unauthenticated RFC 9457 problem details.
 type Unauthenticated = Problem
+
+// Unavailable RFC 9457 problem details.
+type Unavailable = Problem
 
 // Validation RFC 9457 problem details.
 type Validation = Problem
@@ -828,11 +912,35 @@ type StreamJobLogParams struct {
 	LastEventID *string `json:"Last-Event-ID,omitempty"`
 }
 
+// ListProjectSecretsParams defines parameters for ListProjectSecrets.
+type ListProjectSecretsParams struct {
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PutProjectSecretParams defines parameters for PutProjectSecret.
+type PutProjectSecretParams struct {
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
 // ListRunnersParams defines parameters for ListRunners.
 type ListRunnersParams struct {
 	// Cursor Opaque cursor from a previous page's `nextCursor`.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListOrgSecretsParams defines parameters for ListOrgSecrets.
+type ListOrgSecretsParams struct {
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PutOrgSecretParams defines parameters for PutOrgSecret.
+type PutOrgSecretParams struct {
+	IfMatch *string `json:"If-Match,omitempty"`
 }
 
 // GithubWebhookJSONBody defines parameters for GithubWebhook.
@@ -869,8 +977,14 @@ type LinkRepositoryJSONRequestBody = RepositoryLink
 // CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
 type CreateRunJSONRequestBody = RunCreate
 
+// PutProjectSecretJSONRequestBody defines body for PutProjectSecret for application/json ContentType.
+type PutProjectSecretJSONRequestBody = SecretPut
+
 // CreateRunnerRegistrationTokenJSONRequestBody defines body for CreateRunnerRegistrationToken for application/json ContentType.
 type CreateRunnerRegistrationTokenJSONRequestBody = RunnerRegistrationTokenCreate
+
+// PutOrgSecretJSONRequestBody defines body for PutOrgSecret for application/json ContentType.
+type PutOrgSecretJSONRequestBody = SecretPut
 
 // LintPipelineJSONRequestBody defines body for LintPipeline for application/json ContentType.
 type LintPipelineJSONRequestBody = LintRequest

@@ -240,6 +240,23 @@ func TestAuthzMatrix(t *testing.T) {
 		{"POST", "/api/v1/orgs/{orgSlug}/runner-registration-tokens", func(*fixture) (string, string) {
 			return org("/runner-registration-tokens"), `{"labels":[],"trusted":true,"expiresInMinutes":5}`
 		}, statuses(201, 201, 403, 403, 404, 401, 403)},
+		{"GET", "/api/v1/orgs/{orgSlug}/secrets", func(*fixture) (string, string) { return org("/secrets"), "" },
+			statuses(200, 200, 200, 403, 404, 401, 403)},
+		{"PUT", "/api/v1/orgs/{orgSlug}/secrets/{secretName}", func(*fixture) (string, string) {
+			return org("/secrets/" + secretName()), `{"value":"s3cr3t-value","allProjects":true}`
+		}, statuses(201, 201, 403, 403, 404, 401, 403)},
+		{"DELETE", "/api/v1/orgs/{orgSlug}/secrets/{secretName}", func(f *fixture) (string, string) {
+			return org("/secrets/" + f.newSecret("")), ""
+		}, statuses(204, 204, 403, 403, 404, 401, 403)},
+		{"GET", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/secrets"), ""
+		}, statuses(200, 200, 200, 403, 404, 401, 403)},
+		{"PUT", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets/{secretName}", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/secrets/" + secretName()), `{"value":"s3cr3t-value","branches":["main"]}`
+		}, statuses(201, 201, 403, 403, 404, 401, 403)},
+		{"DELETE", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets/{secretName}", func(f *fixture) (string, string) {
+			return org("/projects/" + f.project + "/secrets/" + f.newSecret(f.project)), ""
+		}, statuses(204, 204, 403, 403, 404, 401, 403)},
 		// Everyone but the owner targets someone else's token: not found.
 		{"DELETE", "/api/v1/tokens/{tokenId}", func(f *fixture) (string, string) { return "/api/v1/tokens/" + f.ownerToken(), "" },
 			statuses(204, 404, 404, 404, 404, 401, 403)},
@@ -344,6 +361,24 @@ func (f *fixture) linkedNewProject() string {
 	e.mustStatus(e.do(f.actors[owner], http.MethodPut, "/api/v1/orgs/"+f.org+"/projects/"+slug+"/repository",
 		fmt.Sprintf(`{"installationId":%d,"fullName":"acme/%s"}`, f.installationID, slug)), http.StatusOK)
 	return slug
+}
+
+var secretSeq atomic.Int64
+
+// secretName returns a fresh secret name.
+func secretName() string { return fmt.Sprintf("TOKEN_%d", secretSeq.Add(1)) }
+
+// newSecret creates a secret in org A (or in project, when set) as the
+// owner and returns its name.
+func (f *fixture) newSecret(project string) string {
+	e := f.env
+	name := secretName()
+	path := "/api/v1/orgs/" + f.org + "/secrets/" + name
+	if project != "" {
+		path = "/api/v1/orgs/" + f.org + "/projects/" + project + "/secrets/" + name
+	}
+	e.mustStatus(e.do(f.actors[owner], http.MethodPut, path, `{"value":"s3cr3t-value"}`), http.StatusCreated)
+	return name
 }
 
 // testPipeline has two jobs, the second needing the first.

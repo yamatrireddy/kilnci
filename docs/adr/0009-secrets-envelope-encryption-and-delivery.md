@@ -37,11 +37,14 @@ stronger condition, defined in §5.
    - Each secret value is sealed with AES-256-GCM under its org's DEK, with
      a fresh random 96-bit nonce per write. The **additional authenticated
      data** binds the ciphertext to its row: org ID, scope kind (`org` or
-     `project`), scope ID, secret name, DEK version, and a **value version**
-     that increases on every write. A ciphertext copied into another row,
-     scope, org, or name fails to open, and an older ciphertext of the same
-     secret (for example a leaked value that was just rotated) cannot be
-     restored in place (T-62).
+     `project`), scope ID, secret name, the secret's **row ID**, DEK
+     version, and a **value version** that increases on every write. A
+     ciphertext copied into another row, scope, org, or name fails to open,
+     and an older ciphertext of the same secret (for example a leaked value
+     that was just rotated) cannot be restored in place (T-62). The row ID
+     matters because a deleted and recreated secret starts again at value
+     version 1: the new row has a new ID, so the old incarnation's
+     ciphertexts do not open in it.
    - Plaintext DEKs are cached in memory for at most 5 minutes so a busy
      scheduler does not call Vault on every lease; values are never cached.
    - Only the standard library (`crypto/aes`, `crypto/cipher`, `crypto/hkdf`,
@@ -85,8 +88,10 @@ stronger condition, defined in §5.
    - **Cloud KMS (AWS, GCP, Azure) is deferred.** Their SDKs are large new
      dependencies; the provider interface (wrap/unwrap/rewrap with an org
      context) is shaped so they can be added later without schema changes.
-   - No provider configured means the secrets feature is off: the API returns
-     `503` with a problem type saying so, and pipelines that declare secrets
+   - No provider configured means the secrets feature is off: creating or
+     replacing a secret returns `503` with a problem type saying so (after
+     authorization, so outsiders still see `404`); listing and deleting
+     keep working so an operator can clean up; and pipelines that declare secrets
      fail with a clear reason. Kiln never generates or defaults a master
      key, and `--embedded` mode keeps working without one (invariant 7).
    - At startup, Kiln counts wrapped DEKs whose key ID the provider does
@@ -123,6 +128,15 @@ stronger condition, defined in §5.
      entry saying the value will not be masked in logs, the metadata records
      `masked: false` so the UI can keep showing it, and the audit event
      notes it.
+   - Replacing an existing secret requires `If-Match` with the ETag (the
+     value version) from the previous write; without it the API returns
+     `428`, and a stale one returns `412`. This stops an admin working from
+     a stale form from silently widening restrictions another admin just
+     narrowed. Creates in one scope are serialized so the 500-per-scope
+     limit cannot be raced.
+   - Values are UTF-8 text; binary values should be encoded (for example as
+     base64). JSON decoding replaces invalid UTF-8 with U+FFFD, so the API
+     cannot reject it byte-for-byte.
    - Every create, replace, and delete is audit-logged with the actor,
      scope, and name, never the value (T-11, T-47).
 
@@ -231,9 +245,10 @@ stronger condition, defined in §5.
   and wrapped DEKs; the KEK is in a file or in Vault. Values never appear in
   API responses, logs, traces, errors, or audit records.
 - *Tampering (T-62):* GCM authenticates each value; the additional data
-  binds it to org, scope kind and ID, name, DEK version, and value
+  binds it to org, scope kind and ID, name, row ID, DEK version, and value
   version, so rows cannot be swapped, moved between tenants, or rolled back
-  to an older value. Wrapped DEKs are bound to their org (local: additional
+  to an older value, including an older incarnation of a deleted and
+  recreated secret. Wrapped DEKs are bound to their org (local: additional
   data; Vault: derived key context, verified at startup). Residual: an
   attacker with database write access can still delete secrets or
   re-insert a deleted secret together with its old DEK row.

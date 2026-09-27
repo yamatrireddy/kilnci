@@ -28,6 +28,11 @@ var (
 	ErrRateLimited = errors.New("rate limited")
 	// ErrPreconditionFailed means an If-Match or similar precondition did not hold.
 	ErrPreconditionFailed = errors.New("precondition failed")
+	// ErrPreconditionRequired means an update must carry If-Match and did not.
+	ErrPreconditionRequired = errors.New("precondition required")
+	// ErrUnavailable means the feature is not configured on this server
+	// (e.g. no secrets key provider).
+	ErrUnavailable = errors.New("unavailable")
 )
 
 // FieldError describes one invalid input field. Field is a JSON pointer-like

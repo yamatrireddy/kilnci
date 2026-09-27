@@ -5,6 +5,7 @@
 package api_test
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,11 +25,13 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/platform/objstore"
 	"github.com/yamatrireddy/kilnci/server/internal/platform/pki"
 	"github.com/yamatrireddy/kilnci/server/internal/scheduler"
+	"github.com/yamatrireddy/kilnci/server/internal/secrets"
 	"github.com/yamatrireddy/kilnci/server/internal/service/audit"
 	"github.com/yamatrireddy/kilnci/server/internal/service/logs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
+	secretsvc "github.com/yamatrireddy/kilnci/server/internal/service/secrets"
 	"github.com/yamatrireddy/kilnci/server/internal/service/vcs"
 	"github.com/yamatrireddy/kilnci/server/internal/store"
 	"github.com/yamatrireddy/kilnci/server/internal/store/storetest"
@@ -66,6 +69,9 @@ type env struct {
 	runners  *runners.Service
 	logs     *logs.Service
 	vcs      *vcs.Service
+	secrets  *secretsvc.Service
+	keyring  *secrets.Keyring
+	authn    *auth.Service
 	clock    *clock
 	// bootstrap is the instance admin's email for this env.
 	bootstrap string
@@ -108,9 +114,20 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(func() { _ = obj.Close() })
 	vcsSvc := vcs.NewService(st, az, rec, (&githubtest.Fake{DefaultFile: fakePipeline}).Client(t), runSvc, gen,
 		vcs.Options{WebhookSecret: []byte(testWebhookSecret), PublicOrigin: origin}, clk.now)
+	// Test-only master key generated per env; not a real key.
+	kek := make([]byte, secrets.KeySize)
+	if _, err := rand.Read(kek); err != nil {
+		t.Fatal(err)
+	}
+	wrapper, err := secrets.NewLocalWrapper(kek, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring := secrets.NewKeyring(wrapper, 0)
+	secretSvc := secretsvc.NewService(st, az, rec, keyring, gen, clk.now)
 	logSvc := logs.NewService(st, az, obj, bus.NewInProcess(), logs.Options{StreamPoll: 50 * time.Millisecond, MaxStream: 300 * time.Millisecond}, clk.now)
 	h, rt, err := api.NewHandler(api.Deps{
-		Log: logging.Discard(), IDs: gen, Authn: authSvc, Auth: authSvc, Orgs: orgSvc, Runs: runSvc, Runners: runnerSvc, Logs: logSvc, VCS: vcsSvc,
+		Log: logging.Discard(), IDs: gen, Authn: authSvc, Auth: authSvc, Orgs: orgSvc, Runs: runSvc, Runners: runnerSvc, Logs: logSvc, VCS: vcsSvc, Secrets: secretSvc,
 		Options: api.Options{
 			MaxBodyBytes: 1 << 20,
 			HSTS:         true,
@@ -120,7 +137,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{t: t, h: h, rt: rt, st: st, idp: idp, recorder: rec, runs: runSvc, runners: runnerSvc, logs: logSvc, vcs: vcsSvc, clock: clk, bootstrap: bootstrap, keys: map[string]string{}}
+	return &env{t: t, h: h, rt: rt, st: st, idp: idp, recorder: rec, runs: runSvc, runners: runnerSvc, logs: logSvc, vcs: vcsSvc, secrets: secretSvc, keyring: keyring, authn: authSvc, clock: clk, bootstrap: bootstrap, keys: map[string]string{}}
 }
 
 // client is one caller: anonymous, a browser session, or a bearer token.

@@ -38,6 +38,7 @@ type Deps struct {
 	Runners RunnerService
 	Logs    LogService
 	VCS     VCSService
+	Secrets SecretService
 	Checks  map[string]ReadinessCheck
 	Options Options
 }
@@ -53,6 +54,7 @@ type server struct {
 	runners   RunnerService
 	logs      LogService
 	vcs       VCSService
+	secrets   SecretService
 	logLimits *logLimiter
 }
 
@@ -76,6 +78,7 @@ func NewHandler(d Deps) (http.Handler, *Router, error) {
 		runners:   d.Runners,
 		logs:      d.Logs,
 		vcs:       d.VCS,
+		secrets:   d.Secrets,
 		logLimits: newLogLimiter(),
 	}
 
@@ -181,6 +184,13 @@ func (s *server) register(rt *Router) {
 		const jobPath = "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/runs/{runId}/jobs/{jobId}"
 		rt.Handle(get, jobPath+"/logs", authz.ActionLogsRead, s.getJobLog)
 		rt.Handle(get, jobPath+"/logs/stream", authz.ActionLogsRead, s.streamJobLog)
+	}
+	if s.secrets != nil {
+		for _, base := range []string{"/api/v1/orgs/{orgSlug}/secrets", "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets"} {
+			rt.Handle(get, base, authz.ActionSecretsList, s.listSecrets)
+			rt.Handle(put, base+"/{secretName}", authz.ActionSecretsManage, s.putSecret)
+			rt.Handle(del, base+"/{secretName}", authz.ActionSecretsManage, s.deleteSecret)
+		}
 	}
 	if s.runners != nil {
 		rt.Handle(get, "/api/v1/orgs/{orgSlug}/runners", authz.ActionRunnersList, s.listRunners)
