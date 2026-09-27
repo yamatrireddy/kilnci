@@ -612,6 +612,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{orgSlug}/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        /** The org's secrets' metadata (developers). Values are never returned. */
+        get: operations["listOrgSecrets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/secrets/{secretName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                secretName: components["parameters"]["SecretName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Create or replace an org secret (admins). The value is write-only. Audited.
+         * @description Org secrets are delivered only to the projects they name
+         *     (`projectSlugs`) or to every project (`allProjects: true`); a new
+         *     org secret with neither reaches no project (ADR-0009 §3).
+         *     Values under 4 bytes are saved but cannot be masked in logs; the
+         *     response then carries a warning and the secret reports `masked: false`.
+         *     Replacing an existing secret requires `If-Match` with the ETag from
+         *     the previous write (428 without it), so a stale form cannot silently
+         *     undo another admin's change.
+         */
+        put: operations["putOrgSecret"];
+        post?: never;
+        /** Delete an org secret (admins). Audited. */
+        delete: operations["deleteOrgSecret"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        /** The project's secrets' metadata (developers). Values are never returned. */
+        get: operations["listProjectSecrets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets/{secretName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                secretName: components["parameters"]["SecretName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Create or replace a project secret (admins). The value is write-only. Audited.
+         * @description Shadows an org secret of the same name for this project.
+         *     Values under 4 bytes are saved but cannot be masked in logs; the
+         *     response then carries a warning and the secret reports `masked: false`.
+         *     Replacing an existing secret requires `If-Match` with the ETag from
+         *     the previous write (428 without it), so a stale form cannot silently
+         *     undo another admin's change.
+         */
+        put: operations["putProjectSecret"];
+        post?: never;
+        /** Delete a project secret (admins). Audited. */
+        delete: operations["deleteProjectSecret"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tokens": {
         parameters: {
             query?: never;
@@ -971,6 +1071,54 @@ export interface components {
             installationId: number;
             fullName: string;
         };
+        /** @description Environment-variable name. The KILN_, LD_, DYLD_, GIT_, and SSH_ prefixes and names such as PATH are reserved. */
+        SecretName: string;
+        /** @description A branch name, "*", or a prefix ending in "/*". Patterns only narrow delivery; they never make an unprotected branch eligible. */
+        BranchPattern: string;
+        SecretPut: {
+            /** @description At most 64 KiB of UTF-8 text without NUL bytes; encode binary values (for example as base64). Never returned. */
+            value: string;
+            branches?: components["schemas"]["BranchPattern"][];
+            /**
+             * @description Deliver to every trusted run of the scope, not only pushes to protected branches. Anyone with push access can then read the value.
+             * @default false
+             */
+            allowUnprotected: boolean;
+            /**
+             * @description Org secrets only. Every project of the org may use the secret.
+             * @default false
+             */
+            allProjects: boolean;
+            /** @description Org secrets only. The projects that may use the secret. */
+            projectSlugs?: components["schemas"]["Slug"][];
+        };
+        Secret: {
+            name: components["schemas"]["SecretName"];
+            /** @enum {string} */
+            scope: "org" | "project";
+            /** Format: int64 */
+            valueVersion: number;
+            /** @description False when the value is shorter than 4 bytes and cannot be masked in logs. */
+            masked: boolean;
+            branches: string[];
+            allowUnprotected: boolean;
+            allProjects?: boolean;
+            projectSlugs?: components["schemas"]["Slug"][];
+            createdBy?: string | null;
+            updatedBy?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        SecretWritten: {
+            secret: components["schemas"]["Secret"];
+            warnings: string[];
+        };
+        SecretList: {
+            items: components["schemas"]["Secret"][];
+            nextCursor?: string | null;
+        };
     };
     responses: {
         /** @description Redirect */
@@ -1045,6 +1193,33 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /** @description If-Match did not match the current version */
+        PreconditionFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The update must carry If-Match with the current ETag */
+        PreconditionRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
+        /** @description The feature is not configured on this server (e.g. no secrets key provider) */
+        Unavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
         /** @description Unexpected server error */
         Internal: {
             headers: {
@@ -1060,6 +1235,7 @@ export interface components {
         ProjectSlug: components["schemas"]["Slug"];
         RunID: components["schemas"]["ID"];
         UserID: components["schemas"]["ID"];
+        SecretName: components["schemas"]["SecretName"];
         /** @description Opaque cursor from a previous page's `nextCursor`. */
         Cursor: string;
         Limit: number;
@@ -2142,6 +2318,237 @@ export interface operations {
             422: components["responses"]["Validation"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["Internal"];
+        };
+    };
+    listOrgSecrets: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of secrets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    putOrgSecret: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                secretName: components["parameters"]["SecretName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecretPut"];
+            };
+        };
+        responses: {
+            /** @description Replaced */
+            200: {
+                headers: {
+                    ETag?: string;
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretWritten"];
+                };
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    ETag?: string;
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretWritten"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["PreconditionFailed"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteOrgSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                secretName: components["parameters"]["SecretName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    listProjectSecrets: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of secrets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    putProjectSecret: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                secretName: components["parameters"]["SecretName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecretPut"];
+            };
+        };
+        responses: {
+            /** @description Replaced */
+            200: {
+                headers: {
+                    ETag?: string;
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretWritten"];
+                };
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    ETag?: string;
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretWritten"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["PreconditionFailed"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["Validation"];
+            428: components["responses"]["PreconditionRequired"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteProjectSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgSlug: components["parameters"]["OrgSlug"];
+                projectSlug: components["parameters"]["ProjectSlug"];
+                secretName: components["parameters"]["SecretName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Validation"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Unavailable"];
         };
     };
     listTokens: {

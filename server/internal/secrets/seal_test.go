@@ -19,7 +19,7 @@ func testKey(t *testing.T) []byte {
 
 func TestSealOpen_RoundTrip(t *testing.T) {
 	dek := testKey(t)
-	aad := AAD{OrgID: "org1", ScopeKind: ScopeProject, ScopeID: "proj1", Name: "TOKEN", DEKVersion: 3, ValueVersion: 1}
+	aad := AAD{OrgID: "org1", ScopeKind: ScopeProject, ScopeID: "proj1", Name: "TOKEN", SecretID: "sec1", DEKVersion: 3, ValueVersion: 1}
 	for _, pt := range [][]byte{[]byte("abcd"), bytes.Repeat([]byte{0xff}, 64<<10)} {
 		sealed, err := Seal(dek, pt, aad)
 		if err != nil {
@@ -64,6 +64,8 @@ func TestOpen_RejectsAnyOtherContext(t *testing.T) {
 		"scope":      with(func(a *AAD) { a.ScopeID = "proj2" }),
 		"name":       with(func(a *AAD) { a.Name = "TOKEN2" }),
 		"dek":        with(func(a *AAD) { a.DEKVersion = 2 }),
+		// A recreated secret (new row, same name) cannot take the old value.
+		"secret id": with(func(a *AAD) { a.SecretID = "sec2" }),
 		// An older ciphertext of the same secret cannot be restored in place.
 		"value version": with(func(a *AAD) { a.ValueVersion = 2 }),
 		// Netstrings keep field boundaries unambiguous.
@@ -110,7 +112,7 @@ func TestSeal_RejectsWrongKeySize(t *testing.T) {
 }
 
 func testAAD() AAD {
-	return AAD{OrgID: "org1", ScopeKind: ScopeProject, ScopeID: "proj1", Name: "TOKEN", DEKVersion: 1, ValueVersion: 1}
+	return AAD{OrgID: "org1", ScopeKind: ScopeProject, ScopeID: "proj1", Name: "TOKEN", SecretID: "sec1", DEKVersion: 1, ValueVersion: 1}
 }
 
 func TestSealOpen_RejectIncompleteContext(t *testing.T) {
@@ -121,6 +123,7 @@ func TestSealOpen_RejectIncompleteContext(t *testing.T) {
 		"no scope":      func(a *AAD) { a.ScopeID = "" },
 		"bad kind":      func(a *AAD) { a.ScopeKind = "env" },
 		"no name":       func(a *AAD) { a.Name = "" },
+		"no secret id":  func(a *AAD) { a.SecretID = "" },
 		"dek 0":         func(a *AAD) { a.DEKVersion = 0 },
 		"value 0":       func(a *AAD) { a.ValueVersion = 0 },
 		"neg value ver": func(a *AAD) { a.ValueVersion = -1 },

@@ -262,6 +262,7 @@ func TestErrorWriter_MapsDomainErrors(t *testing.T) {
 		{domain.ErrForbidden, 403, ProblemForbidden},
 		{domain.ErrRateLimited, 429, ProblemRateLimited},
 		{domain.ErrPreconditionFailed, 412, ProblemPreconditionFailed},
+		{domain.ErrPreconditionRequired, 428, ProblemPreconditionRequired},
 		{&http.MaxBytesError{Limit: 1}, 413, ProblemPayloadTooLarge},
 	}
 	for _, tt := range tests {

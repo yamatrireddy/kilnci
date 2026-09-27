@@ -46,6 +46,9 @@ const (
 	ActionVCSInstallationsList   Action = "vcs-installations:list"
 	ActionVCSInstallationsManage Action = "vcs-installations:manage"
 
+	ActionSecretsList   Action = "secrets:list"
+	ActionSecretsManage Action = "secrets:manage"
+
 	ActionTokensList   Action = "tokens:list"
 	ActionTokensCreate Action = "tokens:create"
 	ActionTokensDelete Action = "tokens:delete"
@@ -112,6 +115,10 @@ var policy = map[Action]rule{
 	// Binding a GitHub installation to an org decides which tenant may use
 	// its repositories (ADR-0008 §2): instance admins only.
 	ActionVCSInstallationsManage: {instanceAdmin: true},
+
+	// Names (never values) are needed to write pipelines (ADR-0009).
+	ActionSecretsList:   {minRole: domain.RoleDeveloper},
+	ActionSecretsManage: {minRole: domain.RoleAdmin},
 
 	ActionTokensList:   {selfOnly: true},
 	ActionTokensCreate: {selfOnly: true},

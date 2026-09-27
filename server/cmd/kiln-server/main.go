@@ -39,6 +39,7 @@ import (
 	"github.com/yamatrireddy/kilnci/server/internal/service/orgs"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runners"
 	"github.com/yamatrireddy/kilnci/server/internal/service/runs"
+	secretsvc "github.com/yamatrireddy/kilnci/server/internal/service/secrets"
 	"github.com/yamatrireddy/kilnci/server/internal/service/vcs"
 	"github.com/yamatrireddy/kilnci/server/internal/store"
 	"github.com/yamatrireddy/kilnci/server/internal/vcs/github"
@@ -185,6 +186,17 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 	sched.Progressor().SetObserver(vcsSvc)
 	runSvc.SetObserver(vcsSvc)
 
+	keyring, knownKeyIDs, err := openKeyring(ctx, cfg.Secrets, log)
+	if err != nil {
+		return err
+	}
+	secretSvc := secretsvc.NewService(st, authorizer, recorder, keyring, gen, nil)
+	if keyring != nil {
+		if err := secretSvc.VerifyDataKeys(ctx, knownKeyIDs); err != nil {
+			return err //nolint:wrapcheck // user-facing, key-free
+		}
+	}
+
 	var webFS fs.FS
 	if cfg.Web.Dir != "" {
 		webFS = os.DirFS(cfg.Web.Dir)
@@ -199,6 +211,7 @@ func run(ctx context.Context, args []string, src config.Source, stderr io.Writer
 		Runners: runnerSvc,
 		Logs:    logSvc,
 		VCS:     vcsSvc,
+		Secrets: secretSvc,
 		Checks:  checks,
 		Options: api.Options{
 			MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,

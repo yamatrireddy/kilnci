@@ -127,3 +127,12 @@ func (w *LocalWrapper) keyFor(id string) ([]byte, error) {
 		return nil, ErrUnknownKey
 	}
 }
+
+// KeyIDs returns the IDs of every KEK this wrapper can unwrap with.
+func (w *LocalWrapper) KeyIDs() []string {
+	ids := []string{w.current.id}
+	if w.previous != nil {
+		ids = append(ids, w.previous.id)
+	}
+	return ids
+}

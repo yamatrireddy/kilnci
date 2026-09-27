@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -300,4 +301,16 @@ func (v *VaultWrapper) do(ctx context.Context, method string, u *url.URL, payloa
 		return errors.New("vault: malformed response")
 	}
 	return nil
+}
+
+// KeyIDs returns the key IDs this wrapper can unwrap with, given the
+// Transit key's versions from Check: every version from
+// min_decryption_version (at least 1) to the latest.
+func (v *VaultWrapper) KeyIDs(info VaultKeyInfo) []string {
+	lowest := max(info.MinDecryptionVersion, 1)
+	ids := make([]string, 0, max(info.LatestVersion-lowest+1, 0))
+	for n := lowest; n <= info.LatestVersion; n++ {
+		ids = append(ids, v.keyPrefix()+"v"+strconv.Itoa(n))
+	}
+	return ids
 }

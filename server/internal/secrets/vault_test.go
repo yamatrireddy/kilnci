@@ -355,3 +355,16 @@ func TestVaultWrapper_DoesNotFollowRedirects(t *testing.T) {
 		t.Fatal("NewVaultWrapper modified the shared client")
 	}
 }
+
+func TestVaultWrapper_KeyIDs(t *testing.T) {
+	_, w, _ := newVaultFixture(t)
+	if got := strings.Join(w.KeyIDs(VaultKeyInfo{LatestVersion: 3, MinDecryptionVersion: 2}), ","); got != "vault:kiln:v2,vault:kiln:v3" {
+		t.Fatalf("KeyIDs = %s", got)
+	}
+	if got := strings.Join(w.KeyIDs(VaultKeyInfo{LatestVersion: 2}), ","); got != "vault:kiln:v1,vault:kiln:v2" {
+		t.Fatalf("KeyIDs = %s", got)
+	}
+	if got := w.KeyIDs(VaultKeyInfo{}); len(got) != 0 {
+		t.Fatalf("KeyIDs = %v", got)
+	}
+}

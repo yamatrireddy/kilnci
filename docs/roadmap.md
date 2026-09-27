@@ -85,8 +85,8 @@ shipped earlier; Phase 2 builds on them.
 
 | Slice | Scope | Status |
 |---|---|---|
-| 0. ADR + crypto | ADR-0009 (secrets); `internal/secrets`: AES-256-GCM envelope encryption, per-org DEKs, `local` and Vault Transit KEK providers, DEK cache; `KILN_SECRETS_PROVIDER` config | in review |
-| 1. Secrets API | Org and project secrets, org-secret project allow-lists, branch patterns, write-only values, warnings for values under 4 bytes, audit events; dedicated Vault client and startup key checks wired in | planned |
+| 0. ADR + crypto | ADR-0009 (secrets); `internal/secrets`: AES-256-GCM envelope encryption, per-org DEKs, `local` and Vault Transit KEK providers, DEK cache; `KILN_SECRETS_PROVIDER` config | done (PR #13) |
+| 1. Secrets API | Org and project secrets, org-secret project allow-lists, branch patterns, write-only values, warnings for values under 4 bytes, audit events; dedicated Vault client and startup key checks wired in | in review |
 | 2. Delivery | Per-step `secrets:` in the pipeline spec; protected-branch pushes only (recorded at run creation) unless an admin widens a secret; trusted runners only; resolved and audited at lease time; `KILN_SECRETS_WITHHELD` otherwise | planned |
 | 3. Rotation | `kiln-server secrets rewrap` (KEK, refuses to finish while DEKs remain on other keys) and `rotate-dek` (per org); KEK-compromise runbook | planned |
 | 4. Fork-PR policy | Per-project approval policy; test that approving a fork run cannot apply to a later push | planned |

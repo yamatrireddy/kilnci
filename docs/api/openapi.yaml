@@ -33,6 +33,7 @@ tags:
   - name: pipelines
   - name: runners
   - name: vcs
+  - name: secrets
 
 paths:
   /healthz:
@@ -916,6 +917,198 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/Internal" }
 
+  /api/v1/orgs/{orgSlug}/secrets:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+    get:
+      tags: [secrets]
+      operationId: listOrgSecrets
+      summary: The org's secrets' metadata (developers). Values are never returned.
+      x-kiln-permission: secrets:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of secrets
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/v1/orgs/{orgSlug}/secrets/{secretName}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/SecretName"
+    put:
+      tags: [secrets]
+      operationId: putOrgSecret
+      summary: Create or replace an org secret (admins). The value is write-only. Audited.
+      description: |
+        Org secrets are delivered only to the projects they name
+        (`projectSlugs`) or to every project (`allProjects: true`); a new
+        org secret with neither reaches no project (ADR-0009 §3).
+        Values under 4 bytes are saved but cannot be masked in logs; the
+        response then carries a warning and the secret reports `masked: false`.
+        Replacing an existing secret requires `If-Match` with the ETag from
+        the previous write (428 without it), so a stale form cannot silently
+        undo another admin's change.
+      x-kiln-permission: secrets:manage
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          schema: { type: string, maxLength: 40, pattern: '^"[0-9]{1,19}"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecretPut" }
+      responses:
+        "200":
+          description: Replaced
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretWritten" }
+        "201":
+          description: Created
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretWritten" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "428": { $ref: "#/components/responses/PreconditionRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      tags: [secrets]
+      operationId: deleteOrgSecret
+      summary: Delete an org secret (admins). Audited.
+      x-kiln-permission: secrets:manage
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+    get:
+      tags: [secrets]
+      operationId: listProjectSecrets
+      summary: The project's secrets' metadata (developers). Values are never returned.
+      x-kiln-permission: secrets:list
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of secrets
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/v1/orgs/{orgSlug}/projects/{projectSlug}/secrets/{secretName}:
+    parameters:
+      - $ref: "#/components/parameters/OrgSlug"
+      - $ref: "#/components/parameters/ProjectSlug"
+      - $ref: "#/components/parameters/SecretName"
+    put:
+      tags: [secrets]
+      operationId: putProjectSecret
+      summary: Create or replace a project secret (admins). The value is write-only. Audited.
+      description: |
+        Shadows an org secret of the same name for this project.
+        Values under 4 bytes are saved but cannot be masked in logs; the
+        response then carries a warning and the secret reports `masked: false`.
+        Replacing an existing secret requires `If-Match` with the ETag from
+        the previous write (428 without it), so a stale form cannot silently
+        undo another admin's change.
+      x-kiln-permission: secrets:manage
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          schema: { type: string, maxLength: 40, pattern: '^"[0-9]{1,19}"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecretPut" }
+      responses:
+        "200":
+          description: Replaced
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretWritten" }
+        "201":
+          description: Created
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretWritten" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "428": { $ref: "#/components/responses/PreconditionRequired" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      tags: [secrets]
+      operationId: deleteProjectSecret
+      summary: Delete a project secret (admins). Audited.
+      x-kiln-permission: secrets:manage
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/Internal" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
   /api/v1/tokens:
     get:
       tags: [tokens]
@@ -1013,6 +1206,11 @@ components:
       in: path
       required: true
       schema: { $ref: "#/components/schemas/ID" }
+    SecretName:
+      name: secretName
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/SecretName" }
     Cursor:
       name: cursor
       in: query
@@ -1066,6 +1264,21 @@ components:
       description: Too many requests
       headers:
         Retry-After: { schema: { type: integer } }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PreconditionFailed:
+      description: If-Match did not match the current version
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PreconditionRequired:
+      description: The update must carry If-Match with the current ETag
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unavailable:
+      description: The feature is not configured on this server (e.g. no secrets key provider)
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1554,3 +1767,80 @@ components:
       properties:
         installationId: { type: integer, format: int64, minimum: 1 }
         fullName: { type: string, minLength: 3, maxLength: 140, pattern: "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$" }
+
+    SecretName:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+      description: Environment-variable name. The KILN_, LD_, DYLD_, GIT_, and SSH_ prefixes and names such as PATH are reserved.
+    BranchPattern:
+      type: string
+      minLength: 1
+      maxLength: 200
+      description: A branch name, "*", or a prefix ending in "/*". Patterns only narrow delivery; they never make an unprotected branch eligible.
+    SecretPut:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          writeOnly: true
+          description: At most 64 KiB of UTF-8 text without NUL bytes; encode binary values (for example as base64). Never returned.
+        branches:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/BranchPattern" }
+        allowUnprotected:
+          type: boolean
+          default: false
+          description: Deliver to every trusted run of the scope, not only pushes to protected branches. Anyone with push access can then read the value.
+        allProjects:
+          type: boolean
+          default: false
+          description: Org secrets only. Every project of the org may use the secret.
+        projectSlugs:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/Slug" }
+          description: Org secrets only. The projects that may use the secret.
+    Secret:
+      type: object
+      additionalProperties: false
+      required: [name, scope, valueVersion, masked, branches, allowUnprotected, createdAt, updatedAt]
+      properties:
+        name: { $ref: "#/components/schemas/SecretName" }
+        scope: { type: string, enum: [org, project] }
+        valueVersion: { type: integer, format: int64 }
+        masked:
+          type: boolean
+          description: False when the value is shorter than 4 bytes and cannot be masked in logs.
+        branches: { type: array, items: { type: string } }
+        allowUnprotected: { type: boolean }
+        allProjects: { type: boolean }
+        projectSlugs: { type: array, items: { $ref: "#/components/schemas/Slug" } }
+        createdBy: { type: string, nullable: true }
+        updatedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SecretWritten:
+      type: object
+      additionalProperties: false
+      required: [secret, warnings]
+      properties:
+        secret: { $ref: "#/components/schemas/Secret" }
+        warnings: { type: array, items: { type: string } }
+    SecretList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Secret" }
+        nextCursor: { type: string, nullable: true }

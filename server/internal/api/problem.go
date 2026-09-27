@@ -27,17 +27,18 @@ type Problem struct {
 
 // Problem type URIs.
 const (
-	ProblemNotFound           = "urn:kiln:problem:not-found"
-	ProblemConflict           = "urn:kiln:problem:conflict"
-	ProblemValidation         = "urn:kiln:problem:validation"
-	ProblemForbidden          = "urn:kiln:problem:forbidden"
-	ProblemUnauthenticated    = "urn:kiln:problem:unauthenticated"
-	ProblemRateLimited        = "urn:kiln:problem:rate-limited"
-	ProblemPreconditionFailed = "urn:kiln:problem:precondition-failed"
-	ProblemMethodNotAllowed   = "urn:kiln:problem:method-not-allowed"
-	ProblemPayloadTooLarge    = "urn:kiln:problem:payload-too-large"
-	ProblemUnavailable        = "urn:kiln:problem:unavailable"
-	ProblemInternal           = "urn:kiln:problem:internal"
+	ProblemNotFound             = "urn:kiln:problem:not-found"
+	ProblemConflict             = "urn:kiln:problem:conflict"
+	ProblemValidation           = "urn:kiln:problem:validation"
+	ProblemForbidden            = "urn:kiln:problem:forbidden"
+	ProblemUnauthenticated      = "urn:kiln:problem:unauthenticated"
+	ProblemRateLimited          = "urn:kiln:problem:rate-limited"
+	ProblemPreconditionFailed   = "urn:kiln:problem:precondition-failed"
+	ProblemPreconditionRequired = "urn:kiln:problem:precondition-required"
+	ProblemMethodNotAllowed     = "urn:kiln:problem:method-not-allowed"
+	ProblemPayloadTooLarge      = "urn:kiln:problem:payload-too-large"
+	ProblemUnavailable          = "urn:kiln:problem:unavailable"
+	ProblemInternal             = "urn:kiln:problem:internal"
 )
 
 type problemKind struct {
@@ -58,6 +59,8 @@ var domainProblems = []struct {
 	{domain.ErrUnauthenticated, problemKind{ProblemUnauthenticated, "Authentication required", http.StatusUnauthorized}},
 	{domain.ErrRateLimited, problemKind{ProblemRateLimited, "Too many requests", http.StatusTooManyRequests}},
 	{domain.ErrPreconditionFailed, problemKind{ProblemPreconditionFailed, "Precondition failed", http.StatusPreconditionFailed}},
+	{domain.ErrPreconditionRequired, problemKind{ProblemPreconditionRequired, "If-Match required", http.StatusPreconditionRequired}},
+	{domain.ErrUnavailable, problemKind{ProblemUnavailable, "Not available on this server", http.StatusServiceUnavailable}},
 }
 
 var internalProblem = problemKind{ProblemInternal, "Internal server error", http.StatusInternalServerError}

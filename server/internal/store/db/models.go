@@ -257,6 +257,35 @@ type RunnerRegistrationToken struct {
 	RunnerID  *string
 }
 
+type Secret struct {
+	ID               string
+	OrgID            string
+	ProjectID        *string
+	Name             string
+	DekVersion       int32
+	ValueVersion     int64
+	Ciphertext       []byte
+	Masked           bool
+	Branches         []string
+	AllowUnprotected bool
+	AllProjects      bool
+	ProjectIds       []string
+	CreatedBy        *string
+	UpdatedBy        *string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type SecretDataKey struct {
+	OrgID       string
+	Version     int32
+	KeyID       string
+	Wrapped     []byte
+	Active      bool
+	CreatedAt   time.Time
+	RewrappedAt *time.Time
+}
+
 type User struct {
 	ID            string
 	OidcIssuer    *string

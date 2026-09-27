@@ -36,6 +36,10 @@ type AAD struct {
 	ScopeKind string
 	ScopeID   string
 	Name      string
+	// SecretID is the secret row's unique ID. A deleted and recreated
+	// secret gets a new ID, so ciphertexts of the old one cannot be
+	// restored into the new row even though its value version restarts.
+	SecretID string
 	// DEKVersion is the org data key version that sealed the value.
 	DEKVersion int32
 	// ValueVersion increases on every write of the secret, so an older
@@ -44,7 +48,7 @@ type AAD struct {
 }
 
 func (a AAD) validate() error {
-	if a.OrgID == "" || a.ScopeID == "" || a.Name == "" || a.DEKVersion < 1 || a.ValueVersion < 1 ||
+	if a.OrgID == "" || a.ScopeID == "" || a.Name == "" || a.SecretID == "" || a.DEKVersion < 1 || a.ValueVersion < 1 ||
 		(a.ScopeKind != ScopeOrg && a.ScopeKind != ScopeProject) {
 		return errors.New("secret context is incomplete")
 	}
@@ -55,7 +59,7 @@ func (a AAD) validate() error {
 // a netstring ("<len>:<bytes>,"), so no two distinct AADs share an encoding.
 func (a AAD) bytes() []byte {
 	b := []byte("kiln-secret-v1|")
-	for _, f := range []string{a.OrgID, a.ScopeKind, a.ScopeID, a.Name} {
+	for _, f := range []string{a.OrgID, a.ScopeKind, a.ScopeID, a.Name, a.SecretID} {
 		b = appendNetstring(b, f)
 	}
 	b = appendNetstring(b, strconv.FormatInt(int64(a.DEKVersion), 10))
